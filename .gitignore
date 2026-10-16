@@ -1,0 +1,10 @@
+backend/target/
+backend/data/
+frontend/node_modules/
+frontend/dist/
+.DS_Store
+*.iml
+.idea/
+
+# local mysql credentials
+backend/src/main/resources/application-mysql-local.yml

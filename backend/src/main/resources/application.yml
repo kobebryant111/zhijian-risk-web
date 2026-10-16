@@ -1,0 +1,34 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: zhijian-risk-web
+  datasource:
+    url: jdbc:mysql://123.57.30.98:3306/riskdb?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: admin
+    password: nbcb,111
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 2
+
+  # JPA 已移除，改用 MyBatis-Plus
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    db-config:
+      id-type: auto
+      table-underline: true
+
+app:
+  jwt:
+    secret: zhijian-risk-web-dev-secret-change-me-32bytes-min
+    expire-hours: 72
+
+logging:
+  level:
+    org.springframework.security: INFO
