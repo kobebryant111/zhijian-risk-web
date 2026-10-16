@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyAdvice;
 
 /**
- * 把 Controller 返回的业务对象包成统一信封。已经是信封的不再包一层。
+ * 兜底包装。Controller 应直接返回 {@link ApiResult}；这里只包住漏网的业务对象，已经是信封的不再套一层。
  */
 @RestControllerAdvice(basePackages = "com.zhijian.risk.web")
 public class ApiResponseAdvice implements ResponseBodyAdvice<Object> {

@@ -1,8 +1,5 @@
 package com.zhijian.risk.web;
 
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import com.zhijian.risk.domain.WhistleReport;
 import com.zhijian.risk.service.WhistleService;
 import org.springframework.web.bind.annotation.*;
@@ -10,40 +7,28 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
 
-/**
- * 吹哨人 HTTP 接口。
- */
+/** 风险吹哨：本批报告的查询与发起。 */
 @RestController
 @RequestMapping("/api/whistle")
 public class WhistleController {
-    private static final Logger log = LoggerFactory.getLogger(WhistleController.class);
-
     private final WhistleService whistleService;
-    public WhistleController(WhistleService whistleService) { this.whistleService = whistleService; }
 
-    /**
-     * 列表查询。
-     */
-    @GetMapping("/reports")
-    public List<WhistleReport> list() {
-        log.debug("list start");
-
-        return whistleService.list(AuthSupport.requireOrgId());
+    public WhistleController(WhistleService whistleService) {
+        this.whistleService = whistleService;
     }
 
-    /**
-     * 按 ID 查询详情。
-     * @param id id
-     */
-    @GetMapping("/reports/{id}")
-    public WhistleReport get(@PathVariable Long id) {
-        log.debug("get id={}", id);
+    @GetMapping("/reports")
+    public ApiResult<List<WhistleReport>> list() {
+        return ApiResult.ok(whistleService.list(AuthSupport.requireOrgId()));
+    }
 
-        return whistleService.get(AuthSupport.requireOrgId(), id);
+    @GetMapping("/reports/{id}")
+    public ApiResult<WhistleReport> get(@PathVariable Long id) {
+        return ApiResult.ok(whistleService.get(AuthSupport.requireOrgId(), id));
     }
 
     @PostMapping("/jobs")
-    public WhistleReport start(@RequestBody(required = false) Map<String, Object> body) {
-        return whistleService.startJob(AuthSupport.requireOrgId(), body == null ? Map.of() : body);
+    public ApiResult<WhistleReport> start(@RequestBody(required = false) Map<String, Object> body) {
+        return ApiResult.ok(whistleService.startJob(AuthSupport.requireOrgId(), body == null ? Map.of() : body));
     }
 }

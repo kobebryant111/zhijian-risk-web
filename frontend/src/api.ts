@@ -11,6 +11,7 @@ http.interceptors.request.use((config) => {
   return config
 })
 
+// 后端统一返回 { code, message, data }。这里取出 data，页面仍按业务对象使用。
 http.interceptors.response.use(
   (r) => {
     const body = r.data

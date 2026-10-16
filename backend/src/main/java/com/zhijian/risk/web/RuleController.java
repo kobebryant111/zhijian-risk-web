@@ -1,8 +1,5 @@
 package com.zhijian.risk.web;
 
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import com.zhijian.risk.domain.RiskRule;
 import com.zhijian.risk.service.RuleService;
 import org.springframework.web.bind.annotation.*;
@@ -10,60 +7,36 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
 
-/**
- * 规则库 HTTP 接口。
- */
+/** 规则库。组织尚无规则时，列表接口会补一套默认规则。 */
 @RestController
 @RequestMapping("/api/rules")
 public class RuleController {
-    private static final Logger log = LoggerFactory.getLogger(RuleController.class);
-
     private final RuleService ruleService;
-    public RuleController(RuleService ruleService) { this.ruleService = ruleService; }
 
-    /**
-     * 列表查询。
-     */
+    public RuleController(RuleService ruleService) {
+        this.ruleService = ruleService;
+    }
+
     @GetMapping
-    public List<RiskRule> list() {
-        log.debug("list start");
-
+    public ApiResult<List<RiskRule>> list() {
         Long orgId = AuthSupport.requireOrgId();
         ruleService.ensureDefaults(orgId);
-        return ruleService.list(orgId);
+        return ApiResult.ok(ruleService.list(orgId));
     }
 
-    /**
-     * 创建资源。
-     * @param body body
-     */
     @PostMapping
-    public RiskRule create(@RequestBody Map<String, Object> body) {
-        log.info("create bodyPresent={}", body != null);
-
-        return ruleService.create(AuthSupport.requireOrgId(), body);
+    public ApiResult<RiskRule> create(@RequestBody Map<String, Object> body) {
+        return ApiResult.ok(ruleService.create(AuthSupport.requireOrgId(), body));
     }
 
-    /**
-     * 更新资源。
-     * @param id id
-     * @param body body
-     */
     @PutMapping("/{id}")
-    public RiskRule update(@PathVariable Long id, @RequestBody Map<String, Object> body) {
-        log.info("update id={}, bodyPresent={}", body != null);
-
-        return ruleService.update(AuthSupport.requireOrgId(), id, body);
+    public ApiResult<RiskRule> update(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        return ApiResult.ok(ruleService.update(AuthSupport.requireOrgId(), id, body));
     }
 
-    /**
-     * 删除资源。
-     * @param id id
-     */
     @DeleteMapping("/{id}")
-    public void delete(@PathVariable Long id) {
-        log.info("delete id={}", id);
-
+    public ApiResult<Void> delete(@PathVariable Long id) {
         ruleService.delete(AuthSupport.requireOrgId(), id);
+        return ApiResult.ok(null);
     }
 }
