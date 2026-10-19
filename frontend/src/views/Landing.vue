@@ -14,7 +14,7 @@ function goLogin() {
   <div class="page">
     <header class="nav">
       <div class="brand">
-        <span class="logo">鉴</span>
+        <img class="logo" src="/brand/logo.jpg" alt="" />
         <strong>智鉴风控官</strong>
       </div>
       <nav class="links">
@@ -29,7 +29,7 @@ function goLogin() {
 
     <main class="hero">
       <section class="left">
-        <div class="mark">鉴</div>
+        <img class="mark" src="/brand/logo.jpg" alt="" />
         <h1>合作机构风险，值得一套可登录的智鉴工作台</h1>
         <p class="lead">
           多组织隔离 · 名单与报告分属各部门 · 登录后协同监测准入与吹哨。
@@ -47,11 +47,6 @@ function goLogin() {
           </button>
         </div>
 
-        <ul class="checks">
-          <li><i>✓</i> 组织级数据隔离</li>
-          <li><i>✓</i> 创建组织 / 拉人入组</li>
-          <li><i>✓</i> 机构名单按组织分管</li>
-        </ul>
       </section>
 
       <section class="right" id="features">
@@ -104,11 +99,10 @@ function goLogin() {
 }
 .brand { display: flex; align-items: center; gap: 10px; font-size: 18px; }
 .logo, .mark {
-  width: 36px; height: 36px; border-radius: 50%;
-  background: var(--accent); color: white;
-  display: grid; place-items: center; font-weight: 700;
+  width: 36px; height: 36px; border-radius: 9px;
+  object-fit: cover; display: block;
 }
-.mark { width: 56px; height: 56px; font-size: 22px; margin-bottom: 18px; }
+.mark { width: 56px; height: 56px; border-radius: 14px; margin-bottom: 18px; }
 .links { display: flex; gap: 22px; margin-left: auto; color: var(--muted); font-size: 14px; font-weight: 500; }
 .btn-dark {
   border: 0; border-radius: 999px; background: var(--btn); color: #fff;
@@ -132,14 +126,6 @@ function goLogin() {
 .eyebrow { color: var(--accent); font-size: 13px; font-weight: 700; margin-bottom: 8px; }
 .login-card h3 { margin: 0 0 8px; font-size: 22px; }
 .login-card p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
-.checks {
-  display: flex; flex-wrap: wrap; gap: 18px; list-style: none; padding: 0; margin: 22px 0 0;
-  color: var(--muted); font-size: 14px; font-weight: 500;
-}
-.checks i {
-  display: inline-grid; place-items: center; width: 18px; height: 18px; margin-right: 6px;
-  border-radius: 50%; background: #e8f5ec; color: var(--ok); font-style: normal; font-size: 11px;
-}
 .right { position: relative; min-height: 520px; }
 .phone {
   position: absolute; width: 220px; background: var(--card); border-radius: 28px;

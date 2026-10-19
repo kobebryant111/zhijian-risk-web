@@ -37,7 +37,7 @@ async function submit() {
   <div class="wrap">
     <header class="top">
       <router-link class="brand" to="/">
-        <span class="logo">鉴</span>
+        <img class="logo" src="/brand/logo.jpg" alt="" />
         <strong>智鉴风控官</strong>
       </router-link>
     </header>
@@ -83,13 +83,9 @@ async function submit() {
 .logo {
   width: 32px;
   height: 32px;
-  border-radius: 9px;
-  background: linear-gradient(145deg, #60a5fa, #2563eb);
-  color: #fff;
-  display: grid;
-  place-items: center;
-  font-weight: 700;
-  font-size: 14px;
+  border-radius: 8px;
+  object-fit: cover;
+  display: block;
 }
 .card {
   width: min(420px, 92vw);
