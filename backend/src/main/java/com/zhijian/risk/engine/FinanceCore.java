@@ -57,7 +57,7 @@ public final class FinanceCore {
 
             规则：
             1. 金额统一换算为「亿元人民币」（原文为元则 ÷1e8；万元 ÷1e4）。无法换算则填 null 并在 notes 说明。
-            2. 融资担保公司 partnerType 必须为 guarantee；担保费收入可写入 revenue。
+            2. 融资担保公司 partnerType 必须为 guarantee；担保费收入可写入 revenue；应收代偿、赔偿准备金、未到期责任准备金等写入 notes，并尽量估算 compensationRate / reserveAdequate。
             3. 优先取「本期/期末」相对「上期/期初」计算同比%；利润为负也要如实填写。
             4. 禁止编造原文没有的数字。""";
 
@@ -235,7 +235,7 @@ public final class FinanceCore {
         }
         md.append('\n');
         Object g = m.get("guarantee");
-        if (g instanceof Map<?, ?> gm && ("guarantee".equals(ptype) || (ptype != null && ptype.contains("担保")))) {
+        if (g instanceof Map<?, ?> gm) {
             md.append("## 4. 融担专项\n\n| 指标 | 数值 | 警戒参考 |\n|------|------|----------|\n");
             md.append("| 放大倍数 | ").append(fmt(num(gm, "leverage"), "")).append(" | ≤10（普通） |\n");
             md.append("| 代偿率 | ").append(fmt(num(gm, "compensationRate"), "%")).append(" | <5% |\n");
@@ -245,13 +245,13 @@ public final class FinanceCore {
             md.append("| 资产比例 | ").append(fmt(num(gm, "assetRatio"), "%")).append(" | ≥60% |\n\n");
         }
         md.append("## 5. 同业横向对比\n\n");
-        if (peerLines == null || peerLines.isEmpty()) md.append("本期同类型机构暂无其他评估记录，入库更多机构后可自动排名。\n\n");
+        if (peerLines == null || peerLines.isEmpty()) md.append("本期同类型机构暂无其他评估记录，导入更多机构后可自动排名。\n\n");
         else {
             md.append("| 排名 | 机构 | 评级 | 经营分 |\n|------|------|------|--------|\n");
             md.append(String.join("\n", peerLines)).append("\n\n");
         }
         md.append("## 6. 自身纵向时序\n\n");
-        if (seriesLines == null || seriesLines.size() < 2) md.append("历史期次不足，继续按期间入库后可生成趋势对比。\n\n");
+        if (seriesLines == null || seriesLines.size() < 2) md.append("历史期次不足，继续按季度入库后可生成趋势对比。\n\n");
         else {
             md.append("| 期间 | 经营分 | 评级 | 资产负债率 | 净利率 | FCF |\n|------|--------|------|------------|--------|-----|\n");
             md.append(String.join("\n", seriesLines)).append("\n\n");

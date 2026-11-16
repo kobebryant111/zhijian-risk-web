@@ -7,18 +7,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zhijian.risk.client.LlmClient;
 import com.zhijian.risk.domain.FinanceReport;
 import com.zhijian.risk.domain.Partner;
-import com.zhijian.risk.domain.RiskClue;
 import com.zhijian.risk.engine.FinanceCore;
-import com.zhijian.risk.engine.RuleCatalog;
 import com.zhijian.risk.mapper.FinanceReportMapper;
 import com.zhijian.risk.mapper.PartnerMapper;
-import com.zhijian.risk.mapper.RiskClueMapper;
 import com.zhijian.risk.web.ApiException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
@@ -33,15 +29,14 @@ public class FinanceService {
 
     private final FinanceReportMapper repo;
     private final PartnerMapper partnerRepo;
-    private final RiskClueMapper clueRepo;
     private final SettingsService settings;
     private final LlmClient llm;
     private final ObjectMapper mapper = new ObjectMapper();
     private final ExecutorService pool = Executors.newCachedThreadPool();
 
-    public FinanceService(FinanceReportMapper repo, PartnerMapper partnerRepo, RiskClueMapper clueRepo,
+    public FinanceService(FinanceReportMapper repo, PartnerMapper partnerRepo,
                           SettingsService settings, LlmClient llm) {
-        this.repo = repo; this.partnerRepo = partnerRepo; this.clueRepo = clueRepo;
+        this.repo = repo; this.partnerRepo = partnerRepo;
         this.settings = settings; this.llm = llm;
     }
 
@@ -80,9 +75,12 @@ public class FinanceService {
         String name = str(body, "partnerName", "");
         Long partnerId = body.get("partnerId") == null ? null : Long.valueOf(String.valueOf(body.get("partnerId")));
         String type = str(body, "partnerType", "loan");
-        if (name.isBlank() && partnerId != null) {
+        if (partnerId != null) {
             Partner p = partnerRepo.findByIdAndOrgId(partnerId, orgId).orElse(null);
-            if (p != null) { name = p.getName(); type = p.getPartnerType(); }
+            if (p != null) {
+                if (name.isBlank()) name = p.getName();
+                if (p.getPartnerType() != null && !p.getPartnerType().isBlank()) type = p.getPartnerType();
+            }
         }
         String document = str(body, "documentText", "");
         if (document.isBlank() && !(body.get("metrics") instanceof Map)) {
@@ -107,11 +105,12 @@ public class FinanceService {
         String period = r.getPeriod();
         String doc = document;
         Object metricsIn = body.get("metrics");
-        pool.submit(() -> run(orgId, rid, subj, ptype, period, doc, metricsIn));
+        Long boundPartner = partnerId;
+        pool.submit(() -> run(orgId, rid, boundPartner, subj, ptype, period, doc, metricsIn));
         return r;
     }
 
-    private void run(Long orgId, Long id, String subject, String type, String period, String document, Object metricsIn) {
+    private void run(Long orgId, Long id, Long partnerId, String subject, String type, String period, String document, Object metricsIn) {
         log.info("finance run start orgId={}, id={}, subject={}", orgId, id, subject);
         try {
             patch(id, 30, "running", "正在从财报正文抽取指标…", null, null, null, null);
@@ -125,7 +124,8 @@ public class FinanceService {
                 if (!settings.llmReady(orgId)) {
                     throw new IllegalStateException("LLM 未就绪，无法解析财报附件；请先在设置页配置大模型");
                 }
-                String doc = document.length() > 24000 ? document.substring(0, document.offsetByCodePoints(0, Math.min(24000, document.codePointCount(0, document.length())))) : document;
+                int points = document.codePointCount(0, document.length());
+                String doc = points > 24000 ? document.substring(0, document.offsetByCodePoints(0, 24000)) : document;
                 String ans = llm.chat(
                         settings.get(orgId, SettingsService.LLM_BASE, ""),
                         settings.get(orgId, SettingsService.LLM_KEY, ""),
@@ -133,28 +133,43 @@ public class FinanceService {
                         List.of(
                                 Map.of("role", "system", "content", FinanceCore.EXTRACT_SYSTEM),
                                 Map.of("role", "user", "content", doc)
-                        )
+                        ),
+                        150,
+                        2
                 );
                 metrics = FinanceCore.parseExtract(ans);
                 sourceKind = "text";
             }
-            String name = strOf(metrics.get("partnerName"), subject);
-            String ptype = strOf(metrics.get("partnerType"), type);
-            String per = period == null || period.isBlank() ? strOf(metrics.get("period"), LocalDate.now().getYear() + "全年") : period;
+            String name = "待识别".equals(subject) ? "" : subject;
+            String ptype = type == null || type.isBlank() ? "loan" : type;
+            String per = period == null ? "" : period.trim();
+            if (name.isBlank()) name = strOf(metrics.get("partnerName"), "");
+            if (per.isBlank()) per = strOf(metrics.get("period"), "");
+            String extractedType = strOf(metrics.get("partnerType"), "").toLowerCase();
+            if (allowedType(extractedType) && (ptype.isBlank()
+                    || (partnerId == null && "loan".equals(ptype) && "guarantee".equals(extractedType)))) {
+                ptype = extractedType;
+            }
+            if (name.isBlank()) throw new IllegalStateException("未能识别机构名称，请手动填写后再分析");
+            if (per.isBlank()) per = "报告期";
             FinanceCore.Scored scored = FinanceCore.score(metrics, ptype, name, per);
+            replaceSamePeriod(orgId, id, name, per);
             List<FinanceReport> history = repo.findByOrgIdOrderByCreatedAtDesc(orgId);
-            List<String> peers = peerLines(history, ptype, per, name);
-            List<String> series = seriesLines(history, name, scored);
-            List<String> related = relatedFlags(orgId, name);
+            List<String> peers = peerLines(history, ptype, per, name, scored);
+            List<String> series = seriesLines(history, name, per, scored);
+            List<String> related = relatedFlags(orgId, partnerId, name);
             String md = FinanceCore.markdown(name, ptype, per, scored, related, peers, series, sourceKind);
             List<Map<String, Object>> dims = new ArrayList<>();
             for (FinanceCore.Dimension d : scored.dimensions()) {
                 dims.add(Map.of("name", d.dimension(), "grade", d.grade(), "score", d.score(), "comment", d.comment()));
             }
+            String savedName = name;
+            String savedType = ptype;
+            String savedPeriod = per;
             repo.findById(id).ifPresent(r -> {
-                r.setPartnerName(name);
-                r.setPartnerType(ptype);
-                r.setPeriod(per);
+                r.setPartnerName(savedName);
+                r.setPartnerType(savedType);
+                r.setPeriod(savedPeriod);
                 repo.save(r);
             });
             patch(id, 100, "done", scored.summary(), scored.overall(), md,
@@ -224,37 +239,68 @@ public class FinanceService {
         return out;
     }
 
-    private List<String> peerLines(List<FinanceReport> history, String type, String period, String self) {
-        List<String> lines = new ArrayList<>();
-        Set<String> seen = new HashSet<>();
+    private void replaceSamePeriod(Long orgId, Long currentId, String name, String period) {
+        for (FinanceReport report : repo.findByOrgIdOrderByCreatedAtDesc(orgId)) {
+            if (currentId.equals(report.getId())) continue;
+            if (name.equals(report.getPartnerName()) && period.equals(report.getPeriod())) {
+                repo.deleteById(report.getId());
+            }
+        }
+    }
+
+    private List<String> peerLines(List<FinanceReport> history, String type, String period, String self, FinanceCore.Scored current) {
         List<FinanceReport> peers = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
         for (FinanceReport r : history) {
-            if (!type.equals(r.getPartnerType()) || !period.equals(r.getPeriod())) continue;
             if (!"done".equals(r.getStatus())) continue;
+            if (!type.equals(r.getPartnerType()) || !period.equals(r.getPeriod())) continue;
             if (!seen.add(r.getPartnerName())) continue;
             peers.add(r);
         }
+        if (seen.add(self)) {
+            FinanceReport selfRow = new FinanceReport();
+            selfRow.setPartnerName(self);
+            selfRow.setPartnerType(type);
+            selfRow.setPeriod(period);
+            selfRow.setGrade(current.overall());
+            selfRow.setStatus("done");
+            try { selfRow.setMetricsJson(mapper.writeValueAsString(current.metrics())); } catch (Exception ignored) {}
+            peers.add(selfRow);
+        }
         peers.sort((a, b) -> Integer.compare(scoreOf(b), scoreOf(a)));
+        List<String> lines = new ArrayList<>();
         int rank = 1;
         for (FinanceReport r : peers) {
             if (rank > 12) break;
             lines.add("| " + rank + " | " + r.getPartnerName() + " | " + r.getGrade() + " | " + scoreOf(r) + " |");
             rank++;
         }
-        if (lines.stream().noneMatch(l -> l.contains("| " + self + " |"))) {
-            // 当前报告尚未落库，排名在保存后的下一次报告里补齐。
-        }
         return lines;
     }
 
-    private List<String> seriesLines(List<FinanceReport> history, String name, FinanceCore.Scored current) {
+    private List<String> seriesLines(List<FinanceReport> history, String name, String period, FinanceCore.Scored current) {
+        Map<String, FinanceReport> latest = new LinkedHashMap<>();
         List<FinanceReport> rows = new ArrayList<>();
         for (FinanceReport r : history) {
             if (name.equals(r.getPartnerName()) && "done".equals(r.getStatus())) rows.add(r);
         }
-        rows.sort(Comparator.comparing(r -> r.getPeriod() == null ? "" : r.getPeriod()));
+        rows.sort(Comparator.comparing(FinanceReport::getCreatedAt, Comparator.nullsLast(Comparator.reverseOrder())));
+        for (FinanceReport r : rows) latest.putIfAbsent(r.getPeriod() == null ? "" : r.getPeriod(), r);
+        if (!latest.containsKey(period)) {
+            FinanceReport selfRow = new FinanceReport();
+            selfRow.setPartnerName(name);
+            selfRow.setPeriod(period);
+            selfRow.setGrade(current.overall());
+            selfRow.setStatus("done");
+            selfRow.setCreatedAt(LocalDateTime.now());
+            try { selfRow.setMetricsJson(mapper.writeValueAsString(current.metrics())); } catch (Exception ignored) {}
+            latest.put(period, selfRow);
+        }
+        List<FinanceReport> ordered = new ArrayList<>(latest.values());
+        ordered.sort(Comparator.comparing(r -> r.getPeriod() == null ? "" : r.getPeriod()));
+        if (ordered.size() > 8) ordered = ordered.subList(ordered.size() - 8, ordered.size());
         List<String> lines = new ArrayList<>();
-        for (FinanceReport r : rows) {
+        for (FinanceReport r : ordered) {
             Double al = null, nm = null, fcf = null;
             try {
                 Map<?, ?> m = mapper.readValue(r.getMetricsJson(), Map.class);
@@ -263,27 +309,29 @@ public class FinanceService {
                 fcf = FinanceCore.num(m, "fcf");
             } catch (Exception ignored) {}
             lines.add("| " + r.getPeriod() + " | " + scoreOf(r) + " | " + r.getGrade() + " | "
-                    + fmt(al, "%") + " | " + fmt(nm, "%") + " | " + fmt(fcf, "") + " |");
+                    + fmt1(al) + " | " + fmt1(nm) + " | " + fmt2(fcf) + " |");
         }
-        lines.add("| " + strOf(current.metrics().get("period"), "") + " | " + current.riskScore() + " | " + current.overall()
-                + " | " + fmt(FinanceCore.num(current.metrics(), "assetLiabilityRatio"), "%")
-                + " | " + fmt(FinanceCore.num(current.metrics(), "netMargin"), "%")
-                + " | " + fmt(FinanceCore.num(current.metrics(), "fcf"), "") + " |");
         return lines;
     }
 
-    private List<String> relatedFlags(Long orgId, String name) {
-        List<String> flags = new ArrayList<>();
-        flags.add("机构名单未登记关联方字段：建议在机构资料中补充股东/关联企业后再做穿透。");
-        int n = 0;
-        for (RiskClue c : clueRepo.findByOrgIdOrderByCreatedAtDesc(orgId)) {
-            if (c.getLevel() > 2) continue;
-            if (c.getPartnerName() != null && c.getPartnerName().contains(name)) {
-                flags.add("本机构存在 1/2 级线索：" + c.getTitle());
-                if (++n >= 3) break;
+    private List<String> relatedFlags(Long orgId, Long partnerId, String name) {
+        Partner partner = partnerId == null ? null : partnerRepo.findByIdAndOrgId(partnerId, orgId).orElse(null);
+        if (partner == null) {
+            for (Partner candidate : partnerRepo.findByOrgIdOrderByUpdatedAtDesc(orgId)) {
+                if (name.equals(candidate.getName())) { partner = candidate; break; }
             }
         }
-        return flags;
+        if (partner == null) {
+            return List.of("未绑定机构名单：无法自动穿透股东/关联方，请先在机构名单维护关联方。");
+        }
+        return List.of("关联方名单为空：建议补充股东/关联企业以便穿透核查。");
+    }
+
+    private static boolean allowedType(String type) {
+        return switch (type) {
+            case "loan", "guarantee", "traffic", "payment", "data", "collection", "interbank", "ops" -> true;
+            default -> false;
+        };
     }
 
     private int scoreOf(FinanceReport r) {
@@ -294,7 +342,8 @@ public class FinanceService {
         } catch (Exception e) { return 0; }
     }
 
-    private String fmt(Double v, String suffix) { return v == null ? "—" : String.format("%.2f%s", v, suffix); }
+    private String fmt1(Double v) { return v == null ? "—" : String.format("%.1f%%", v); }
+    private String fmt2(Double v) { return v == null ? "—" : String.format("%.2f", v); }
 
     private String strOf(Object v, String def) {
         if (v == null) return def;

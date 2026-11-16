@@ -44,16 +44,22 @@ public class LlmClient {
      * @return assistant 文本内容
      */
     public String chat(String baseUrl, String apiKey, String model, List<Map<String, String>> messages) {
-        log.info("LLM chat start, model={}, msgs={}", model, messages == null ? 0 : messages.size());
+        return chat(baseUrl, apiKey, model, messages, 120, 1);
+    }
 
+    /** 财报抽取与桌面端一样：超时 150 秒，网关 502/503/429 和握手失败最多再试 retries 次。 */
+    public String chat(String baseUrl, String apiKey, String model, List<Map<String, String>> messages, int timeoutSeconds, int retries) {
+        log.info("LLM chat start, model={}, msgs={}", model, messages == null ? 0 : messages.size());
+        int attempts = Math.max(1, retries + 1);
         Exception last = null;
-        for (int attempt = 0; attempt < 2; attempt++) {
+        for (int attempt = 0; attempt < attempts; attempt++) {
             try {
                 String base = trim(baseUrl);
-                HttpResponse<String> resp = post(base + "/chat/completions", chatBody(model, messages, null), apiKey, Duration.ofSeconds(120));
+                Duration timeout = Duration.ofSeconds(Math.max(1, timeoutSeconds));
+                HttpResponse<String> resp = post(base + "/chat/completions", chatBody(model, messages, null), apiKey, timeout);
                 if (resp.statusCode() == 404) {
                     log.info("LLM chat/completions 404, retry responses, model={}", model);
-                    resp = post(base + "/responses", responsesBody(model, messages, null), apiKey, Duration.ofSeconds(120));
+                    resp = post(base + "/responses", responsesBody(model, messages, null), apiKey, timeout);
                 }
                 if (resp.statusCode() >= 400) {
                     throw new ApiException(HttpStatus.BAD_GATEWAY, "LLM 调用失败: " + errorText(resp));
@@ -63,13 +69,19 @@ public class LlmClient {
                 log.info("LLM chat success, chars={}", answer.length());
                 return answer;
             } catch (ApiException e) {
+                last = e;
+                if (attempt + 1 < attempts && retryableMessage(e.getMessage())) {
+                    log.warn("LLM chat retry after {}", e.getMessage());
+                    pause();
+                    continue;
+                }
                 log.warn("LLM chat business fail: {}", e.getMessage());
                 throw e;
             } catch (Exception e) {
                 last = e;
-                if (attempt == 0 && retryable(e)) {
+                if (attempt + 1 < attempts && retryable(e)) {
                     log.warn("LLM chat retry after {}", e.getMessage());
-                    try { Thread.sleep(800); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                    pause();
                     continue;
                 }
                 break;
@@ -77,6 +89,17 @@ public class LlmClient {
         }
         log.error("LLM chat exception", last);
         throw new ApiException(HttpStatus.BAD_GATEWAY, "LLM 调用异常: " + (last == null ? "" : last.getMessage()));
+    }
+
+    private static void pause() {
+        try { Thread.sleep(800); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+    }
+
+    private static boolean retryableMessage(String message) {
+        if (message == null) return false;
+        String msg = message.toLowerCase();
+        return msg.contains("502") || msg.contains("503") || msg.contains("429")
+                || msg.contains("超时") || msg.contains("timeout") || msg.contains("unavailable");
     }
 
     private static boolean retryable(Exception e) {
