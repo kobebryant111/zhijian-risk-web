@@ -117,6 +117,32 @@ button, input, select, textarea { font: inherit; color: inherit; }
   box-shadow: 0 18px 50px rgba(17, 24, 39, 0.18);
 }
 .dialog.wide { width: min(760px, 100%); }
+.dialog.report-dialog { width: min(1040px, 100%); }
+.report-tools { display: flex; justify-content: flex-end; gap: 8px; margin: 0 0 12px; }
+.report-sheet h1 { font-size: 20px; line-height: 1.35; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.report-sheet h2 { font-size: 15px; margin: 20px 0 10px; padding-left: 10px; border-left: 3px solid var(--accent); }
+.report-sheet h3 { font-size: 14px; margin: 16px 0 8px; }
+.report-sheet p { margin: 8px 0; line-height: 1.7; }
+.report-sheet .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; margin: 0 0 8px; }
+.report-sheet .meta div { display: flex; gap: 8px; background: #f7f9fc; border-radius: 6px; padding: 8px 10px; }
+.report-sheet .meta dt { color: var(--muted); flex: none; }
+.report-sheet .meta dd { margin: 0; }
+.report-sheet ul, .report-sheet ol { margin: 8px 0; padding-left: 1.3em; }
+.report-sheet li { margin: 4px 0; line-height: 1.6; }
+.report-sheet .table-wrap { overflow-x: auto; margin: 8px 0 4px; }
+.report-sheet table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.report-sheet th, .report-sheet td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+.report-sheet th { background: #f6f8fb; font-weight: 600; white-space: nowrap; }
+.report-sheet blockquote { margin: 12px 0; padding: 10px 12px; background: #fff7ed; border-left: 3px solid var(--warn); color: #9a3412; }
+.report-sheet blockquote p { margin: 0; }
+.report-sheet hr { border: 0; border-top: 1px solid var(--line); margin: 18px 0; }
+.report-sheet code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: var(--bg); padding: 1px 4px; border-radius: 4px; }
+.report-sheet .foot { color: var(--muted); font-size: 12px; }
+.report-sheet .tag { display: inline-block; min-width: 1.6em; text-align: center; border-radius: 4px; padding: 0 6px; font-size: 12px; line-height: 20px; }
+.report-sheet .tag-red, .report-sheet .tag-yes { background: #fee2e2; color: #b91c1c; }
+.report-sheet .tag-orange { background: #ffedd5; color: #c2410c; }
+.report-sheet .tag-yellow { background: #fef3c7; color: #b45309; }
+.report-sheet .tag-no { background: var(--bg); color: #64748b; }
 .dialog h3 { margin: 0 0 14px; font-size: 16px; }
 .dialog .field select,
 .dialog .field input,

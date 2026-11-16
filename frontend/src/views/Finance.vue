@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from '../api'
+import ReportView from '../components/ReportView.vue'
 import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
@@ -108,14 +109,14 @@ onUnmounted(() => window.clearInterval(timer))
     </div>
 
     <div v-if="current && !composer" class="mask" @click.self="current = null">
-      <div class="dialog wide" role="dialog">
+      <div class="dialog wide report-dialog" role="dialog">
         <h3>{{ current.partnerName }}</h3>
         <div class="row-actions" style="margin-bottom:10px">
           <span class="badge">评级 {{ current.grade }}</span>
           <span class="badge">{{ current.status }}</span>
         </div>
-        <p>{{ current.summary }}</p>
-        <div class="mono">{{ current.markdown }}</div>
+        <ReportView v-if="current.markdown" :title="current.partnerName" :markdown="current.markdown" />
+        <p v-else>{{ current.summary }}</p>
       </div>
     </div>
   </div>
