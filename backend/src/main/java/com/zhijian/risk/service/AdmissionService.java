@@ -6,11 +6,14 @@ import org.slf4j.LoggerFactory;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zhijian.risk.client.BaiduSearchClient;
 import com.zhijian.risk.client.LlmClient;
+import com.zhijian.risk.client.McpProbe;
 import com.zhijian.risk.domain.AdmissionReview;
+import com.zhijian.risk.domain.Partner;
 import com.zhijian.risk.domain.RiskClue;
 import com.zhijian.risk.engine.AdmissionCore;
 import com.zhijian.risk.engine.SearchCore;
 import com.zhijian.risk.mapper.AdmissionReviewMapper;
+import com.zhijian.risk.mapper.PartnerMapper;
 import com.zhijian.risk.mapper.RiskClueMapper;
 import com.zhijian.risk.web.ApiException;
 import org.springframework.http.HttpStatus;
@@ -23,7 +26,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * 准入官异步评审：检查项、结论与报告。
+ * 准入官异步评审。证据来自本地线索、上传材料、百度搜索和已启用的企查查、天眼查。
  */
 @Service
 public class AdmissionService {
@@ -31,15 +34,17 @@ public class AdmissionService {
 
     private final AdmissionReviewMapper repo;
     private final RiskClueMapper clueRepo;
+    private final PartnerMapper partners;
     private final SettingsService settings;
     private final BaiduSearchClient baidu;
     private final LlmClient llm;
     private final ObjectMapper mapper = new ObjectMapper();
     private final ExecutorService pool = Executors.newCachedThreadPool();
 
-    public AdmissionService(AdmissionReviewMapper repo, RiskClueMapper clueRepo, SettingsService settings,
-                            BaiduSearchClient baidu, LlmClient llm) {
-        this.repo = repo; this.clueRepo = clueRepo; this.settings = settings; this.baidu = baidu; this.llm = llm;
+    public AdmissionService(AdmissionReviewMapper repo, RiskClueMapper clueRepo, PartnerMapper partners,
+                            SettingsService settings, BaiduSearchClient baidu, LlmClient llm) {
+        this.repo = repo; this.clueRepo = clueRepo; this.partners = partners;
+        this.settings = settings; this.baidu = baidu; this.llm = llm;
     }
 
     /**
@@ -102,7 +107,7 @@ public class AdmissionService {
     private void run(Long orgId, Long id, String name, String type, String scenario, String materials) {
         log.info("admission run start orgId={}, id={}, name={}", orgId, id, name);
         try {
-            patch(id, 25, "running", "核验主体公开信息与上传材料…", null, null, null, null, null, true);
+            patch(id, 20, "running", "核验主体公开信息与上传材料…", null, null, null, null, null, true);
             List<AdmissionCore.Evidence> docs = new ArrayList<>();
             List<String> sources = new ArrayList<>();
             for (RiskClue c : clueRepo.findByOrgIdOrderByCreatedAtDesc(orgId)) {
@@ -128,10 +133,14 @@ public class AdmissionService {
                 List<String> aliases = AdmissionCore.aliases(name);
                 SearchCore.SearchOpts opts = SearchCore.lastSemiyear(8);
                 int calls = 0;
+                String baiduErr = null;
                 for (String q : SearchCore.admissionQueries(name)) {
                     if (calls++ >= SearchCore.MAX_CALLS_PER_OPERATION) break;
                     BaiduSearchClient.SearchResult result = baidu.searchDetailed(baiduKey, q, opts);
-                    if (result.error() != null) continue;
+                    if (result.error() != null) {
+                        if (baiduErr == null) baiduErr = result.error();
+                        continue;
+                    }
                     int kept = 0;
                     for (BaiduSearchClient.RawRef h : result.hits()) {
                         String text = h.title() + " " + h.content();
@@ -142,7 +151,17 @@ public class AdmissionService {
                     }
                     if (kept > 0 && !sources.contains("全网搜")) sources.add("全网搜");
                 }
+                if (!sources.contains("全网搜")) {
+                    String note = baiduErr == null ? "全网搜未命中可用公开网页。" : "全网搜未完成：" + clip(baiduErr);
+                    docs.add(new AdmissionCore.Evidence("全网搜", note, "", 3));
+                }
             }
+            patch(id, 55, "running", "正在查询企查查、天眼查…", null, null, null, null, null, true);
+            String query = registryQuery(orgId, name);
+            pullEnterprise(id, "企查查", settings.get(orgId, SettingsService.QCC_ENABLED, "false"),
+                    settings.get(orgId, SettingsService.QCC_KEY, ""), McpProbe.QCC_COMPANY, query, name, docs, sources, true);
+            pullEnterprise(id, "天眼查", settings.get(orgId, SettingsService.TYC_ENABLED, "false"),
+                    settings.get(orgId, SettingsService.TYC_KEY, ""), McpProbe.TYC, query, name, docs, sources, false);
             AdmissionCore.Review review = AdmissionCore.review(name, type, scenario, docs, sources);
             String aiNotes = "";
             String summary = review.summary();
@@ -175,6 +194,7 @@ public class AdmissionService {
                     mapper.writeValueAsString(review.remediation()), aiNotes, review.evidenceIncomplete());
             final String src = String.join(",", sources);
             repo.findById(id).ifPresent(r -> { r.setEvidenceSources(src); repo.save(r); });
+            log.info("admission run done id={} sources={}", id, src);
         } catch (Exception e) {
             log.error("admission run failed id={}", id, e);
             patch(id, 100, "failed", RunFailure.summary("评审", e), "待核验", null, null, null, null, true);
@@ -196,6 +216,53 @@ public class AdmissionService {
             r.setUpdatedAt(LocalDateTime.now());
             repo.save(r);
         });
+    }
+
+    /** 企查查必须带 Bearer。天眼查先用裸 Key，失败再换 Bearer。失败只记一条说明，不让整单评审失败。 */
+    private void pullEnterprise(Long id, String label, String enabled, String key, String url, String query, String name,
+                                List<AdmissionCore.Evidence> docs, List<String> sources, boolean bearerOnly) {
+        if (!"true".equalsIgnoreCase(enabled) || key == null || key.isBlank()) return;
+        String raw = key.trim();
+        try {
+            String text = McpProbe.lookup(url, bearerOnly ? bearer(raw) : raw, query, name);
+            docs.add(new AdmissionCore.Evidence(label, text, "", 1));
+            if (!sources.contains(label)) sources.add(label);
+            return;
+        } catch (RuntimeException first) {
+            if (bearerOnly || raw.regionMatches(true, 0, "Bearer ", 0, 7)) {
+                log.warn("admission {} skipped id={} reason={}", label, id, first.getMessage());
+                docs.add(new AdmissionCore.Evidence(label, label + "补证未完成（已跳过，不阻塞报告）：" + clip(first.getMessage()), "", 3));
+                return;
+            }
+            try {
+                String text = McpProbe.lookup(url, bearer(raw), query, name);
+                docs.add(new AdmissionCore.Evidence(label, text, "", 1));
+                if (!sources.contains(label)) sources.add(label);
+            } catch (RuntimeException second) {
+                log.warn("admission {} skipped id={} reason={}", label, id, second.getMessage());
+                docs.add(new AdmissionCore.Evidence(label, label + "补证未完成（已跳过，不阻塞报告）：" + clip(second.getMessage()), "", 3));
+            }
+        }
+    }
+
+    private String registryQuery(Long orgId, String name) {
+        for (Partner partner : partners.findByOrgIdOrderByUpdatedAtDesc(orgId)) {
+            if (partner.getName() != null && partner.getName().trim().equals(name)) {
+                String uscc = partner.getUscc() == null ? "" : partner.getUscc().trim();
+                if (!uscc.isBlank()) return uscc;
+            }
+        }
+        return name;
+    }
+
+    private static String bearer(String key) {
+        return key.regionMatches(true, 0, "Bearer ", 0, 7) ? key : "Bearer " + key;
+    }
+
+    private static String clip(String text) {
+        if (text == null) return "";
+        String trimmed = text.replace('\n', ' ').trim();
+        return trimmed.length() <= 180 ? trimmed : trimmed.substring(0, 180);
     }
 
     private String str(Map<String, Object> body, String k, String def) {

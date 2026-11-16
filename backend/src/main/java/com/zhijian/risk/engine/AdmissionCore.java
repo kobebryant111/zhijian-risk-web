@@ -106,7 +106,7 @@ public final class AdmissionCore {
         List<String> remediation = new ArrayList<>();
         for (Item i : orange) remediation.add("限期整改：" + i.title() + "（依据：" + i.legalBasis() + "）");
         for (Item i : yellow) remediation.add("持续监控：" + i.title());
-        if (incomplete || !hasExternal) remediation.add("证据不足：请配置百度千帆搜索，或粘贴尽调材料后再签批");
+        if (incomplete || !hasExternal) remediation.add("证据不足：请启用百度搜索、企查查或天眼查，或粘贴尽调材料后再签批");
         if (guaranteeThin) remediation.add("融担核心指标待核验：请补齐放大倍数、代偿率、准备金/在保余额等经营数据后再研判");
         if ("待核验".equals(conclusion)) remediation.add("结论为「待核验」：禁止按「通过」推进业务合作，须补齐证据后重跑");
 

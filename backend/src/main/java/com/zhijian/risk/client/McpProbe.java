@@ -24,6 +24,37 @@ public final class McpProbe {
 
     private McpProbe() {}
 
+    /**
+     * 同一会话里选一个工商查询工具并调用。准入没有工商正文时结论固定为待核验，所以这里必须拿到正文。
+     * 工具名各家不一致，按 basic / search / info / company 的顺序挑，最多试三组参数。
+     */
+    public static String lookup(String url, String authorization, String query, String name) {
+        HttpResult init = send(url, authorization, null, rpcBody(1, "initialize", initParams()));
+        ensureOk(init, "初始化失败");
+        send(url, authorization, init.session, notifyBody());
+        HttpResult listed = send(url, authorization, init.session, rpcBody(2, "tools/list", MAPPER.createObjectNode()));
+        JsonNode tools = ensureOk(listed, "读取工具列表失败").path("result").path("tools");
+        String tool = pickTool(tools);
+        if (tool == null) throw new IllegalArgumentException("无可用工具");
+        String last = "工商 MCP 无有效返回";
+        String[] keys = {"keyword", "searchKey", "name"};
+        String[] values = {query, query, name};
+        for (int i = 0; i < keys.length; i++) {
+            ObjectNode args = MAPPER.createObjectNode();
+            args.put(keys[i], values[i] == null ? "" : values[i]);
+            try {
+                HttpResult called = send(url, authorization, init.session, callBody(3 + i, tool, args));
+                JsonNode message = ensureOk(called, "工具调用失败");
+                String text = summarize(message.path("result"));
+                if (text.length() > 20) return clipTo(text, 6000);
+                last = "返回内容过短";
+            } catch (IllegalArgumentException e) {
+                last = e.getMessage() == null ? "工具调用失败" : e.getMessage();
+            }
+        }
+        throw new IllegalArgumentException(last);
+    }
+
     /** 返回 tools/list 的工具数量。失败时抛出带原因的 IllegalArgumentException。 */
     public static int connect(String url, String authorization) {
         HttpResult init = send(url, authorization, null, rpcBody(1, "initialize", initParams()));
@@ -50,6 +81,44 @@ public final class McpProbe {
         body.put("method", method);
         body.set("params", params);
         return body;
+    }
+
+    private static ObjectNode callBody(int id, String tool, ObjectNode arguments) {
+        ObjectNode params = MAPPER.createObjectNode();
+        params.put("name", tool);
+        params.set("arguments", arguments);
+        return rpcBody(id, "tools/call", params);
+    }
+
+    private static String pickTool(JsonNode tools) {
+        if (!tools.isArray() || tools.isEmpty()) return null;
+        String[] prefer = {"basic", "search", "info", "company", "detail", "risk", "get"};
+        for (String key : prefer) {
+            for (JsonNode tool : tools) {
+                String name = tool.path("name").asText("");
+                if (name.toLowerCase().contains(key)) return name;
+            }
+        }
+        String first = tools.get(0).path("name").asText("");
+        return first.isBlank() ? null : first;
+    }
+
+    private static String summarize(JsonNode result) {
+        JsonNode content = result.path("content");
+        if (content.isArray() && !content.isEmpty()) {
+            StringBuilder text = new StringBuilder();
+            for (JsonNode item : content) {
+                if (!text.isEmpty()) text.append('\n');
+                text.append(item.hasNonNull("text") ? item.path("text").asText("") : item.toString());
+            }
+            return text.toString().trim();
+        }
+        return result.isMissingNode() ? "" : result.toString();
+    }
+
+    private static String clipTo(String text, int max) {
+        if (text.length() <= max) return text;
+        return text.substring(0, max);
     }
 
     private static ObjectNode notifyBody() {
