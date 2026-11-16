@@ -111,12 +111,18 @@ export const api = {
   listWhistleReports: () => http.get<any[]>('/whistle/reports').then((r) => r.data),
   getWhistleReport: (id: number) => http.get<any>(`/whistle/reports/${id}`).then((r) => r.data),
   startWhistleJob: (body: object = {}) => http.post<any>('/whistle/jobs', body).then((r) => r.data),
+  getWhistleSchedule: () => http.get<any>('/whistle/schedule').then((r) => r.data),
+  saveWhistleSchedule: (body: object) => http.put<any>('/whistle/schedule', body).then((r) => r.data),
   listAdmission: () => http.get<any[]>('/admission/reviews').then((r) => r.data),
   getAdmission: (id: number) => http.get<any>(`/admission/reviews/${id}`).then((r) => r.data),
   startAdmission: (body: object) => http.post<any>('/admission/reviews', body).then((r) => r.data),
   listFinance: () => http.get<any[]>('/finance/reports').then((r) => r.data),
   getFinance: (id: number) => http.get<any>(`/finance/reports/${id}`).then((r) => r.data),
   startFinance: (body: object) => http.post<any>('/finance/reports', body).then((r) => r.data),
+  financePeers: (partnerType: string, period: string) =>
+    http.get<any[]>('/finance/peers', { params: { partnerType, period } }).then((r) => r.data),
+  financeSeries: (partnerName: string) =>
+    http.get<any[]>('/finance/series', { params: { partnerName } }).then((r) => r.data),
   listConversations: () => http.get<any[]>('/agent/conversations').then((r) => r.data),
   getConversation: (id: number) => http.get<any>(`/agent/conversations/${id}`).then((r) => r.data),
   createConversation: (title?: string) => http.post<any>('/agent/conversations', { title }).then((r) => r.data),

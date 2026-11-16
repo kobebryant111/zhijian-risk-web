@@ -31,4 +31,14 @@ public class WhistleController {
     public ApiResult<WhistleReport> start(@RequestBody(required = false) Map<String, Object> body) {
         return ApiResult.ok(whistleService.startJob(AuthSupport.requireOrgId(), body == null ? Map.of() : body));
     }
+
+    @GetMapping("/schedule")
+    public ApiResult<Map<String, Object>> schedule() {
+        return ApiResult.ok(whistleService.schedule(AuthSupport.requireOrgId()));
+    }
+
+    @PutMapping("/schedule")
+    public ApiResult<Map<String, Object>> saveSchedule(@RequestBody Map<String, Object> body) {
+        return ApiResult.ok(whistleService.saveSchedule(AuthSupport.requireOrgId(), body));
+    }
 }

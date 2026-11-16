@@ -6,11 +6,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.SpringApplication;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * 智鉴风控官 Web 启动入口。
  */
 @SpringBootApplication
+@EnableScheduling
 @MapperScan("com.zhijian.risk.mapper")
 public class RiskWebApplication {
     private static final Logger log = LoggerFactory.getLogger(RiskWebApplication.class);

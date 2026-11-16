@@ -13,6 +13,12 @@ const busy = ref(false)
 const composer = ref(false)
 const q = ref('')
 const ready = ref({ web: false, mcp: false })
+
+function parsed(raw: unknown) {
+  if (Array.isArray(raw)) return raw
+  if (typeof raw !== 'string' || !raw.trim()) return []
+  try { const value = JSON.parse(raw); return Array.isArray(value) ? value : [] } catch { return [] }
+}
 let timer: number | undefined
 
 function guessType(name: string) {
@@ -145,6 +151,21 @@ onUnmounted(() => window.clearInterval(timer))
           <span class="badge">{{ current.conclusion }}</span>
           <span class="badge" :class="current.status==='done'?'ok':''">{{ current.status }} {{ current.progress }}%</span>
         </div>
+        <p v-if="current.evidenceSources" class="ready-line">证据来源：{{ current.evidenceSources }}</p>
+        <table v-if="parsed(current.itemsJson).length" class="mini-table">
+          <thead><tr><th>编号</th><th>检查项</th><th>触发</th><th>证据</th></tr></thead>
+          <tbody>
+            <tr v-for="item in parsed(current.itemsJson)" :key="item.id">
+              <td>{{ item.id }}</td>
+              <td>{{ item.item }}</td>
+              <td>{{ item.triggered ? '是' : '否' }}</td>
+              <td>{{ item.detail }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <ul v-if="parsed(current.remediationJson).length">
+          <li v-for="(line, i) in parsed(current.remediationJson)" :key="i">{{ line }}</li>
+        </ul>
         <ReportView v-if="current.markdown" :title="current.partnerName" :markdown="current.markdown" />
         <p v-else>{{ current.summary }}</p>
       </div>

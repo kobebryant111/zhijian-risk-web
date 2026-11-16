@@ -22,8 +22,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -98,20 +101,25 @@ public class WhistleService {
     public WhistleReport startJob(Long orgId, Map<String, Object> body) {
         String kind = normalizeKind(str(body, "kind", "daily"));
         String onDate = str(body, "onDate", "");
+        List<Long> picked = longList(body.get("partnerIds"));
         Long partnerId = body.get("partnerId") == null || String.valueOf(body.get("partnerId")).isBlank()
                 ? null : Long.valueOf(String.valueOf(body.get("partnerId")));
-        boolean batchAll = partnerId == null || "true".equalsIgnoreCase(str(body, "batchAll", "false"));
+        if (partnerId != null) picked = List.of(partnerId);
         List<Partner> targets;
         String partnerName;
-        if (batchAll && partnerId == null) {
+        boolean batchAll;
+        if (picked.isEmpty()) {
             targets = partnerRepo.findByOrgIdOrderByUpdatedAtDesc(orgId);
             if (targets.isEmpty()) throw new ApiException(HttpStatus.BAD_REQUEST, "请先导入合作机构名单后再跑批");
             partnerName = "全量机构（" + targets.size() + "）";
+            batchAll = true;
         } else {
-            Partner partner = partnerRepo.findByIdAndOrgId(partnerId, orgId)
-                    .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "所选机构不在当前名单中，请重新选择"));
-            targets = List.of(partner);
-            partnerName = partner.getName();
+            targets = new ArrayList<>();
+            for (Long id : picked) {
+                targets.add(partnerRepo.findByIdAndOrgId(id, orgId)
+                        .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "所选机构不在当前名单中，请重新选择")));
+            }
+            partnerName = targets.size() == 1 ? targets.get(0).getName() : "指定机构（" + targets.size() + "）";
             batchAll = false;
         }
         LocalDate asOf = onDate.isBlank() ? LocalDate.now() : LocalDate.parse(onDate);
@@ -452,6 +460,120 @@ public class WhistleService {
     private String normalizeKind(String kind) {
         if ("weekly".equalsIgnoreCase(kind) || "monthly".equalsIgnoreCase(kind)) return "weekly";
         return "daily";
+    }
+
+    public static final String DAILY_ENABLED = "whistle.dailyEnabled";
+    public static final String DAILY_TIME = "whistle.dailyTime";
+    public static final String WEEKLY_ENABLED = "whistle.weeklyEnabled";
+    public static final String WEEKLY_DOW = "whistle.weeklyDow";
+    public static final String WEEKLY_TIME = "whistle.weeklyTime";
+    public static final String PARTNER_IDS = "whistle.partnerIds";
+    public static final String LAST_DAILY = "whistle.lastDailyRun";
+    public static final String LAST_WEEKLY = "whistle.lastWeeklyRun";
+
+    /** 定时存在组织设置里。到点且当天还没跑过，就按保存的机构范围出日报或周报。 */
+    @Transactional
+    public void tick(Long orgId) {
+        LocalDateTime now = LocalDateTime.now(ZoneId.of("Asia/Shanghai"));
+        String today = now.toLocalDate().toString();
+        List<Long> ids = parseIds(settings.get(orgId, PARTNER_IDS, ""));
+        if (flag(orgId, DAILY_ENABLED, true) && !today.equals(settings.get(orgId, LAST_DAILY, ""))
+                && !now.toLocalTime().isBefore(clock(settings.get(orgId, DAILY_TIME, "08:00")))) {
+            settings.set(orgId, LAST_DAILY, today);
+            startJob(orgId, Map.of("kind", "daily", "partnerIds", ids));
+            log.info("whistle scheduled daily orgId={}", orgId);
+        }
+        int dow = number(settings.get(orgId, WEEKLY_DOW, "1"), 1);
+        if (flag(orgId, WEEKLY_ENABLED, true) && now.getDayOfWeek().getValue() == dow
+                && !today.equals(settings.get(orgId, LAST_WEEKLY, ""))
+                && !now.toLocalTime().isBefore(clock(settings.get(orgId, WEEKLY_TIME, "09:00")))) {
+            settings.set(orgId, LAST_WEEKLY, today);
+            startJob(orgId, Map.of("kind", "weekly", "partnerIds", ids));
+            log.info("whistle scheduled weekly orgId={}", orgId);
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> schedule(Long orgId) {
+        List<Long> ids = parseIds(settings.get(orgId, PARTNER_IDS, ""));
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("dailyEnabled", flag(orgId, DAILY_ENABLED, true));
+        view.put("dailyTime", settings.get(orgId, DAILY_TIME, "08:00"));
+        view.put("weeklyEnabled", flag(orgId, WEEKLY_ENABLED, true));
+        view.put("weeklyDow", number(settings.get(orgId, WEEKLY_DOW, "1"), 1));
+        view.put("weeklyTime", settings.get(orgId, WEEKLY_TIME, "09:00"));
+        view.put("partnerIds", ids);
+        view.put("lastDailyRun", settings.get(orgId, LAST_DAILY, ""));
+        view.put("lastWeeklyRun", settings.get(orgId, LAST_WEEKLY, ""));
+        return view;
+    }
+
+    @Transactional
+    public Map<String, Object> saveSchedule(Long orgId, Map<String, Object> body) {
+        boolean dailyEnabled = bool(body.get("dailyEnabled"), true);
+        boolean weeklyEnabled = bool(body.get("weeklyEnabled"), true);
+        String dailyTime = clockText(str(body, "dailyTime", "08:00"));
+        String weeklyTime = clockText(str(body, "weeklyTime", "09:00"));
+        int dow = number(String.valueOf(body.get("weeklyDow") == null ? "1" : body.get("weeklyDow")), 1);
+        if (dow < 1 || dow > 7) throw new ApiException(HttpStatus.BAD_REQUEST, "周报星期需要是 1 到 7");
+        List<Long> ids = longList(body.get("partnerIds"));
+        settings.set(orgId, DAILY_ENABLED, String.valueOf(dailyEnabled));
+        settings.set(orgId, DAILY_TIME, dailyTime);
+        settings.set(orgId, WEEKLY_ENABLED, String.valueOf(weeklyEnabled));
+        settings.set(orgId, WEEKLY_DOW, String.valueOf(dow));
+        settings.set(orgId, WEEKLY_TIME, weeklyTime);
+        settings.set(orgId, PARTNER_IDS, ids.stream().map(String::valueOf).reduce((a, b) -> a + "," + b).orElse(""));
+        return schedule(orgId);
+    }
+
+    private boolean flag(Long orgId, String key, boolean def) {
+        return bool(settings.get(orgId, key, def ? "true" : "false"), def);
+    }
+
+    private static boolean bool(Object value, boolean def) {
+        if (value == null) return def;
+        String text = String.valueOf(value).trim();
+        if (text.isEmpty()) return def;
+        return "true".equalsIgnoreCase(text) || "1".equals(text);
+    }
+
+    private static int number(String text, int def) {
+        try { return Integer.parseInt(text.trim()); }
+        catch (Exception e) { return def; }
+    }
+
+    private static LocalTime clock(String text) {
+        try { return LocalTime.parse(clockText(text)); }
+        catch (Exception e) { return LocalTime.of(8, 0); }
+    }
+
+    private static String clockText(String text) {
+        String value = text == null ? "" : text.trim();
+        if (!value.matches("([01]\\d|2[0-3]):[0-5]\\d")) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "时间格式应为 HH:mm");
+        }
+        return value;
+    }
+
+    private static List<Long> parseIds(String text) {
+        List<Long> ids = new ArrayList<>();
+        if (text == null || text.isBlank()) return ids;
+        for (String part : text.split(",")) {
+            if (part.isBlank()) continue;
+            try { ids.add(Long.valueOf(part.trim())); }
+            catch (NumberFormatException ignored) { }
+        }
+        return ids;
+    }
+
+    private static List<Long> longList(Object raw) {
+        List<Long> ids = new ArrayList<>();
+        if (!(raw instanceof Collection<?> values)) return ids;
+        for (Object value : values) {
+            if (value == null || String.valueOf(value).isBlank()) continue;
+            ids.add(Long.valueOf(String.valueOf(value)));
+        }
+        return ids;
     }
 
     private String str(Map<String, Object> body, String k, String def) {

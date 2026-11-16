@@ -31,4 +31,14 @@ public class FinanceController {
     public ApiResult<FinanceReport> start(@RequestBody Map<String, Object> body) {
         return ApiResult.ok(financeService.start(AuthSupport.requireOrgId(), body));
     }
+
+    @GetMapping("/peers")
+    public ApiResult<List<Map<String, Object>>> peers(@RequestParam String partnerType, @RequestParam String period) {
+        return ApiResult.ok(financeService.peers(AuthSupport.requireOrgId(), partnerType, period));
+    }
+
+    @GetMapping("/series")
+    public ApiResult<List<Map<String, Object>>> series(@RequestParam String partnerName) {
+        return ApiResult.ok(financeService.series(AuthSupport.requireOrgId(), partnerName));
+    }
 }

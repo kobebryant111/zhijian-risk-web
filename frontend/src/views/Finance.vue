@@ -13,6 +13,8 @@ const partnerId = ref<number | ''>('')
 const partnerName = ref('')
 const period = ref('')
 const documentText = ref('')
+const peers = ref<any[]>([])
+const series = ref<any[]>([])
 const busy = ref(false)
 const composer = ref(false)
 const q = ref('')
@@ -22,7 +24,16 @@ async function load() {
   if (!auth.currentOrgId) return
   rows.value = await api.listFinance()
   partners.value = await api.listPartners()
-  if (current.value?.id) current.value = await api.getFinance(current.value.id)
+  if (current.value?.id) {
+    current.value = await api.getFinance(current.value.id)
+    await side(current.value)
+  }
+}
+
+async function side(report: any) {
+  if (!report || report.status !== 'done') { peers.value = []; series.value = []; return }
+  peers.value = await api.financePeers(report.partnerType || '', report.period || '')
+  series.value = await api.financeSeries(report.partnerName || '')
 }
 
 async function start() {
@@ -46,13 +57,14 @@ function poll() {
     if (!current.value?.id) return
     current.value = await api.getFinance(current.value.id)
     if (current.value.status === 'done' || current.value.status === 'failed') {
-      window.clearInterval(timer); await load()
+      window.clearInterval(timer); await load(); await side(current.value)
     }
   }, 1500)
 }
 
 async function open(r: any) {
   current.value = await api.getFinance(r.id)
+  await side(current.value)
   if (current.value.status === 'running') poll()
 }
 
@@ -99,7 +111,7 @@ onUnmounted(() => window.clearInterval(timer))
             <option v-for="p in partners" :key="p.id" :value="p.id">{{ p.name }}</option>
           </select>
         </div>
-        <div class="field" v-if="!partnerId"><label>主体名称</label><input v-model="partnerName" /></div>
+        <div class="field"><label>主体名称</label><input v-model="partnerName" placeholder="留空则从财报附件识别" /></div>
         <div class="field"><label>报告期间</label><input v-model="period" placeholder="如 2025全年，可留空由正文识别" /></div>
         <AttachFiles
           v-model="documentText"
@@ -119,6 +131,18 @@ onUnmounted(() => window.clearInterval(timer))
         <div class="row-actions" style="margin-bottom:10px">
           <span class="badge">评级 {{ current.grade }}</span>
           <span class="badge">{{ current.status }}</span>
+        </div>
+        <div v-if="peers.length" style="margin-bottom: 12px">
+          <strong>同业横向对比</strong>
+          <table class="mini-table"><thead><tr><th>排名</th><th>机构</th><th>评级</th><th>经营分</th></tr></thead>
+            <tbody><tr v-for="p in peers" :key="p.reportId"><td>{{ p.rank }}</td><td>{{ p.partnerName }}</td><td>{{ p.grade }}</td><td>{{ p.score }}</td></tr></tbody>
+          </table>
+        </div>
+        <div v-if="series.length" style="margin-bottom: 12px">
+          <strong>自身纵向时序</strong>
+          <table class="mini-table"><thead><tr><th>期间</th><th>经营分</th><th>评级</th><th>资产负债率</th><th>净利率</th></tr></thead>
+            <tbody><tr v-for="s in series" :key="s.period"><td>{{ s.period }}</td><td>{{ s.score }}</td><td>{{ s.grade }}</td><td>{{ s.assetLiabilityRatio ?? '—' }}</td><td>{{ s.netMargin ?? '—' }}</td></tr></tbody>
+          </table>
         </div>
         <ReportView v-if="current.markdown" :title="current.partnerName" :markdown="current.markdown" />
         <p v-else>{{ current.summary }}</p>

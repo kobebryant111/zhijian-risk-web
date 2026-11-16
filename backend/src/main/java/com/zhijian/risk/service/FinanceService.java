@@ -84,11 +84,11 @@ public class FinanceService {
             Partner p = partnerRepo.findByIdAndOrgId(partnerId, orgId).orElse(null);
             if (p != null) { name = p.getName(); type = p.getPartnerType(); }
         }
-        if (name.isBlank()) throw new ApiException(HttpStatus.BAD_REQUEST, "请指定经营分析主体");
         String document = str(body, "documentText", "");
         if (document.isBlank() && !(body.get("metrics") instanceof Map)) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "请粘贴财报或审计报告正文");
+            throw new ApiException(HttpStatus.BAD_REQUEST, "请上传财报附件");
         }
+        if (name.isBlank()) name = "待识别";
         FinanceReport r = new FinanceReport();
         r.setOrgId(orgId);
         r.setPartnerName(name);
@@ -163,6 +163,65 @@ public class FinanceService {
             log.error("finance run failed id={}", id, e);
             patch(id, 100, "failed", RunFailure.summary("分析", e), "F", null, null, null);
         }
+    }
+
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> peers(Long orgId, String type, String period) {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        List<FinanceReport> matched = new ArrayList<>();
+        for (FinanceReport report : repo.findByOrgIdOrderByCreatedAtDesc(orgId)) {
+            if (!"done".equals(report.getStatus())) continue;
+            if (type != null && !type.equals(report.getPartnerType())) continue;
+            if (period != null && !period.equals(report.getPeriod())) continue;
+            if (!seen.add(report.getPartnerName())) continue;
+            matched.add(report);
+        }
+        matched.sort((a, b) -> Integer.compare(scoreOf(b), scoreOf(a)));
+        int rank = 1;
+        for (FinanceReport report : matched) {
+            if (rank > 15) break;
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("rank", rank++);
+            row.put("partnerName", report.getPartnerName());
+            row.put("grade", report.getGrade());
+            row.put("score", scoreOf(report));
+            row.put("reportId", report.getId());
+            rows.add(row);
+        }
+        return rows;
+    }
+
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> series(Long orgId, String partnerName) {
+        Map<String, FinanceReport> latest = new LinkedHashMap<>();
+        for (FinanceReport report : repo.findByOrgIdOrderByCreatedAtDesc(orgId)) {
+            if (!"done".equals(report.getStatus()) || !partnerName.equals(report.getPartnerName())) continue;
+            latest.putIfAbsent(report.getPeriod() == null ? "" : report.getPeriod(), report);
+        }
+        List<FinanceReport> rows = new ArrayList<>(latest.values());
+        rows.sort(Comparator.comparing(r -> r.getPeriod() == null ? "" : r.getPeriod()));
+        if (rows.size() > 8) rows = rows.subList(rows.size() - 8, rows.size());
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (FinanceReport report : rows) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("period", report.getPeriod());
+            row.put("grade", report.getGrade());
+            row.put("score", scoreOf(report));
+            row.put("reportId", report.getId());
+            try {
+                Map<?, ?> metrics = mapper.readValue(report.getMetricsJson(), Map.class);
+                row.put("assetLiabilityRatio", FinanceCore.num(metrics, "assetLiabilityRatio"));
+                row.put("netMargin", FinanceCore.num(metrics, "netMargin"));
+                row.put("fcf", FinanceCore.num(metrics, "fcf"));
+            } catch (Exception ignored) {
+                row.put("assetLiabilityRatio", null);
+                row.put("netMargin", null);
+                row.put("fcf", null);
+            }
+            out.add(row);
+        }
+        return out;
     }
 
     private List<String> peerLines(List<FinanceReport> history, String type, String period, String self) {
