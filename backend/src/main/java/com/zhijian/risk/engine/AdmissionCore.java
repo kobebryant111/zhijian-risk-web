@@ -200,14 +200,17 @@ public final class AdmissionCore {
         if (aiNotes != null && !aiNotes.isBlank()) md.append("## AI 研判要点\n\n").append(aiNotes.trim()).append("\n\n");
         for (String[] group : new String[][]{{"red", "一票否决项（红色）"}, {"orange", "重大违规项（橙色）"}, {"yellow", "关注事项（黄色）"}}) {
             md.append("## ").append(group[1]).append("\n\n");
+            int hidden = 0;
+            int shown = 0;
             for (Item i : items) {
                 if (!group[0].equals(i.color())) continue;
-                md.append("- [").append(i.triggered() ? "☑ 触发" : "☐ 未触发").append("] ")
-                        .append(i.title()).append(" — ").append(i.legalBasis()).append('\n');
-                if (i.triggered() && i.evidence() != null && !i.evidence().isBlank()) {
-                    md.append("  - 证据：").append(i.evidence()).append('\n');
-                }
+                if (!i.triggered()) { hidden++; continue; }
+                shown++;
+                md.append("- ☑ ").append(i.title()).append(" — ").append(i.legalBasis()).append('\n');
+                if (i.evidence() != null && !i.evidence().isBlank()) md.append("  - 证据：").append(i.evidence()).append('\n');
             }
+            if (shown == 0) md.append("- 无触发\n");
+            if (hidden > 0) md.append("- 另有 ").append(hidden).append(" 项未触发\n");
             md.append('\n');
         }
         md.append("## 整改 / 监控清单\n\n");
