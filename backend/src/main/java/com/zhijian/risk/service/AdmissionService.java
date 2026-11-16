@@ -177,7 +177,7 @@ public class AdmissionService {
             repo.findById(id).ifPresent(r -> { r.setEvidenceSources(src); repo.save(r); });
         } catch (Exception e) {
             log.error("admission run failed id={}", id, e);
-            patch(id, 100, "failed", "评审失败: " + e.getMessage(), "待核验", null, null, null, null, true);
+            patch(id, 100, "failed", RunFailure.summary("评审", e), "待核验", null, null, null, null, true);
         }
     }
 

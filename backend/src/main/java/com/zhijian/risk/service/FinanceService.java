@@ -161,7 +161,7 @@ public class FinanceService {
                     mapper.writeValueAsString(scored.metrics()), mapper.writeValueAsString(dims));
         } catch (Exception e) {
             log.error("finance run failed id={}", id, e);
-            patch(id, 100, "failed", "分析失败: " + e.getMessage(), "F", null, null, null);
+            patch(id, 100, "failed", RunFailure.summary("分析", e), "F", null, null, null);
         }
     }
 

@@ -261,7 +261,7 @@ public class WhistleService {
             update(reportId, 100, "done", summary, markdown, mapper.writeValueAsString(stats), levels);
         } catch (Exception e) {
             log.error("whistle runJob failed reportId={}", reportId, e);
-            update(reportId, 100, "failed", "任务失败: " + e.getMessage(), null, null, null);
+            update(reportId, 100, "failed", RunFailure.summary("任务", e), null, null, null);
         } finally {
             running.remove(reportId);
         }

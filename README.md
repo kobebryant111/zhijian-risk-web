@@ -10,7 +10,7 @@
 
 - 前端：Vue 3 + Vite + Pinia + Vue Router
 - 后端：Spring Boot 3 + Spring Security JWT + MyBatis-Plus
-- 数据库：MySQL。连接写在 `backend/src/main/resources/application.yml`，表结构见 `backend/src/main/resources/db/mysql/schema.sql`
+- 数据库：MySQL。连接写在 `backend/src/main/resources/application.yml`，表结构见 `backend/src/main/resources/db/mysql/schema.sql`。已有库不要重复执行该脚本。启动时若准入、吹哨、经营、问鉴控的正文和 JSON 列过短，会自动改成 `LONGTEXT`。
 
 ## 接口
 

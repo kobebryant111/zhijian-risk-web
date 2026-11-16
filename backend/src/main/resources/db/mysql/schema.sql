@@ -1,4 +1,5 @@
 -- 智鉴风控官 Web · MySQL 8.x 建表脚本
+-- 已有库不要重复执行（会删表）。大字段过短时，应用启动会改成 LONGTEXT。
 -- 用法：先创建库，再执行本脚本
 --   CREATE DATABASE zhijian_risk DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 --   USE zhijian_risk;
