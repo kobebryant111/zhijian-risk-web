@@ -151,9 +151,8 @@ public class AdmissionService {
                     }
                     if (kept > 0 && !sources.contains("全网搜")) sources.add("全网搜");
                 }
-                if (!sources.contains("全网搜")) {
-                    String note = baiduErr == null ? "全网搜未命中可用公开网页。" : "全网搜未完成：" + clip(baiduErr);
-                    docs.add(new AdmissionCore.Evidence("全网搜", note, "", 3));
+                if (baiduErr != null) {
+                    docs.add(new AdmissionCore.Evidence("全网搜", "全网搜提示：" + clip(baiduErr), "", 3));
                 }
             }
             patch(id, 55, "running", "正在查询企查查、天眼查…", null, null, null, null, null, true);
@@ -165,7 +164,6 @@ public class AdmissionService {
             AdmissionCore.Review review = AdmissionCore.review(name, type, scenario, docs, sources);
             String aiNotes = "";
             String summary = review.summary();
-            String markdown = review.markdown();
             if (settings.llmReady(orgId)) {
                 try {
                     aiNotes = llm.chat(
@@ -179,12 +177,12 @@ public class AdmissionService {
                     );
                     if (!aiNotes.isBlank()) {
                         summary = summary + "\nAI 辅助：" + (aiNotes.length() > 120 ? aiNotes.substring(0, 120) + "…" : aiNotes);
-                        markdown = markdown + "\n## AI 辅助说明\n\n" + aiNotes + "\n";
                     }
                 } catch (Exception e) {
                     aiNotes = "AI 辅助未完成：" + e.getMessage();
                 }
             }
+            String markdown = AdmissionCore.opinion(name, type, usccOf(orgId, name), scenario, review, summary, aiNotes, docs);
             List<Map<String, Object>> items = new ArrayList<>();
             for (AdmissionCore.Item i : review.items()) {
                 items.add(Map.of("id", i.id(), "color", i.color(), "item", i.title(), "legalBasis", i.legalBasis(),
@@ -225,34 +223,49 @@ public class AdmissionService {
         String raw = key.trim();
         try {
             String text = McpProbe.lookup(url, bearerOnly ? bearer(raw) : raw, query, name);
-            docs.add(new AdmissionCore.Evidence(label, text, "", 1));
-            if (!sources.contains(label)) sources.add(label);
+            rememberEnterprise(label, text, docs, sources);
             return;
         } catch (RuntimeException first) {
             if (bearerOnly || raw.regionMatches(true, 0, "Bearer ", 0, 7)) {
                 log.warn("admission {} skipped id={} reason={}", label, id, first.getMessage());
-                docs.add(new AdmissionCore.Evidence(label, label + "补证未完成（已跳过，不阻塞报告）：" + clip(first.getMessage()), "", 3));
+                rememberEnterpriseMiss(label, first.getMessage(), docs, sources);
                 return;
             }
             try {
                 String text = McpProbe.lookup(url, bearer(raw), query, name);
-                docs.add(new AdmissionCore.Evidence(label, text, "", 1));
-                if (!sources.contains(label)) sources.add(label);
+                rememberEnterprise(label, text, docs, sources);
             } catch (RuntimeException second) {
                 log.warn("admission {} skipped id={} reason={}", label, id, second.getMessage());
-                docs.add(new AdmissionCore.Evidence(label, label + "补证未完成（已跳过，不阻塞报告）：" + clip(second.getMessage()), "", 3));
+                rememberEnterpriseMiss(label, second.getMessage(), docs, sources);
             }
         }
     }
 
+    private static void rememberEnterprise(String label, String text, List<AdmissionCore.Evidence> docs, List<String> sources) {
+        String source = "企查查".equals(label) ? "企查查·company" : label;
+        docs.add(new AdmissionCore.Evidence(source, text, "", 1));
+        if (!sources.contains(label)) sources.add(label);
+    }
+
+    private static void rememberEnterpriseMiss(String label, String reason, List<AdmissionCore.Evidence> docs, List<String> sources) {
+        docs.add(new AdmissionCore.Evidence(label, label + "补证未完成（已跳过，不阻塞报告）：" + clip(reason), "", 3));
+        String missed = label + "未完成";
+        if (!sources.contains(missed)) sources.add(missed);
+    }
+
     private String registryQuery(Long orgId, String name) {
+        String uscc = usccOf(orgId, name);
+        return uscc.isBlank() ? name : uscc;
+    }
+
+    private String usccOf(Long orgId, String name) {
         for (Partner partner : partners.findByOrgIdOrderByUpdatedAtDesc(orgId)) {
             if (partner.getName() != null && partner.getName().trim().equals(name)) {
                 String uscc = partner.getUscc() == null ? "" : partner.getUscc().trim();
                 if (!uscc.isBlank()) return uscc;
             }
         }
-        return name;
+        return "";
     }
 
     private static String bearer(String key) {

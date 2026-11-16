@@ -1,5 +1,7 @@
 package com.zhijian.risk.engine;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -18,8 +20,10 @@ public final class AdmissionCore {
             5）结论建议：否决 / 有条件通过 / 待核验 / 通过 之一，并说明理由
             硬约束：
             - 只依据给定证据，禁止编造案号、处罚决定书、失信名单、财务数字；不确定就写「待核验」。
-            - 「全网搜」只是舆情/开庭/投诉网页，不能代替工商登记。
-            - 结论建议必须与清单统计一致，不得改写规则已经给出的结论。""";
+            - 工商登记（统一社会信用代码、注册资本、股东/实控人、成立日期、登记状态）以「企查查」「天眼查」来源为准。
+            - 「全网搜」只是舆情/开庭/投诉网页，不能代替工商登记；不要把网页证据写成「材料中未提供工商信息」。
+            - 「财报附件」与「全网搜」要交叉印证：舆情暴雷要对照财报是否恶化；财报异常要对照公开负面信息。
+            - 若企查查/天眼查证据里已有字段，必须写出来并标明来源；若这两项显示「未完成」或正文无该字段，才写待核验。""";
 
     public record CheckDef(String id, String color, String title, String legalBasis, String[] types, String[] keywords) {}
 
@@ -94,7 +98,7 @@ public final class AdmissionCore {
         List<Item> yellow = items.stream().filter(i -> "yellow".equals(i.color()) && i.triggered()).toList();
         boolean incomplete = docs.isEmpty();
         boolean hasExternal = sourceLabels.stream().anyMatch(s ->
-                "企查查".equals(s) || "天眼查".equals(s) || "全网搜".equals(s) || "财报附件".equals(s) || "上传材料".equals(s) || "本地线索".equals(s));
+                "企查查".equals(s) || "天眼查".equals(s) || "全网搜".equals(s) || "财报附件".equals(s) || "上传材料".equals(s));
         boolean guaranteeThin = "guarantee".equals(partnerType) && docs.stream().noneMatch(d ->
                 d.text().contains("放大倍数") || d.text().contains("代偿率") || d.text().contains("担保赔偿准备金") || d.text().contains("在保余额"));
         String conclusion;
@@ -106,7 +110,7 @@ public final class AdmissionCore {
         List<String> remediation = new ArrayList<>();
         for (Item i : orange) remediation.add("限期整改：" + i.title() + "（依据：" + i.legalBasis() + "）");
         for (Item i : yellow) remediation.add("持续监控：" + i.title());
-        if (incomplete || !hasExternal) remediation.add("证据不足：请启用百度搜索、企查查或天眼查，或粘贴尽调材料后再签批");
+        if (incomplete || !hasExternal) remediation.add("证据不足：请配置百度千帆搜索或企查查/天眼查，或粘贴尽调材料后再签批");
         if (guaranteeThin) remediation.add("融担核心指标待核验：请补齐放大倍数、代偿率、准备金/在保余额等经营数据后再研判");
         if ("待核验".equals(conclusion)) remediation.add("结论为「待核验」：禁止按「通过」推进业务合作，须补齐证据后重跑");
 
@@ -114,8 +118,14 @@ public final class AdmissionCore {
         String summary = String.format("%s（%s）场景「%s」：一票否决 %d 项触发，重大违规 %d 项，关注 %d 项 → 结论【%s】%s",
                 name, RuleCatalog.partnerTypeLabel(partnerType), scenario, redN, orange.size(), yellow.size(), conclusion,
                 incomplete ? "（证据不完整）" : "");
-        String markdown = render(name, partnerType, scenario, conclusion, incomplete, items, remediation, summary, sourceLabels);
+        String markdown = opinion(name, partnerType, "", scenario, conclusion, incomplete, items, remediation, summary, sourceLabels, "", docs);
         return new Review(conclusion, incomplete, items, remediation, summary, markdown, sourceLabels);
+    }
+
+    /** 与桌面端同一份准入意见书：工商摘录、AI 研判要点、分色清单和签批区。 */
+    public static String opinion(String name, String partnerType, String uscc, String scenario, Review review, String summary, String aiNotes, List<Evidence> docs) {
+        return opinion(name, partnerType, uscc, scenario, review.conclusion(), review.evidenceIncomplete(),
+                review.items(), review.remediation(), summary, review.sources(), aiNotes, docs);
     }
 
     public static String notesUser(String name, String ptype, String scenario, Review review, List<Evidence> docs) {
@@ -134,45 +144,78 @@ public final class AdmissionCore {
                 if (++n >= 8) break;
             }
         }
+        List<Evidence> ordered = new ArrayList<>(docs);
+        ordered.sort((a, b) -> Integer.compare(evidenceRank(a.source()), evidenceRank(b.source())));
         StringBuilder evidence = new StringBuilder();
         int shown = 0;
-        for (Evidence d : docs) {
+        for (Evidence d : ordered) {
             if (shown++ >= 14) break;
-            int limit = d.source().contains("财报") || d.source().contains("上传") ? 3200 : 280;
+            int limit = d.source().contains("财报") || d.source().contains("上传") ? 3200
+                    : d.source().contains("企查") || d.source().contains("天眼") ? 1600 : 280;
             evidence.append("- [").append(d.source()).append("] ").append(clip(d.text(), limit)).append('\n');
         }
         return "机构：" + name + "\n类型：" + RuleCatalog.partnerTypeLabel(ptype) + "\n场景：" + scenario
-                + "\n规则结论：" + review.conclusion()
                 + "\n统计：红" + red + "/橙" + orange + "/黄" + yellow
                 + "\n已触发：\n" + (triggered.isEmpty() ? "（无）\n" : triggered)
                 + "关键未触发（待核实）：\n" + (pending.isEmpty() ? "（无）\n" : pending)
                 + "证据摘要：\n" + evidence;
     }
 
-    private static String render(String name, String ptype, String scenario, String conclusion, boolean incomplete,
-                                 List<Item> items, List<String> remediation, String summary, List<String> sources) {
+    private static String opinion(String name, String ptype, String uscc, String scenario, String conclusion, boolean incomplete,
+                                  List<Item> items, List<String> remediation, String summary, List<String> sources,
+                                  String aiNotes, List<Evidence> docs) {
         StringBuilder md = new StringBuilder();
-        md.append("# 准入评审 — ").append(name).append("\n\n");
+        String code = uscc == null || uscc.isBlank() ? "—" : uscc;
+        String when = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+        md.append("# 准入意见书 · ").append(name).append("\n\n");
         md.append("- 机构类型：").append(RuleCatalog.partnerTypeLabel(ptype)).append('\n');
+        md.append("- 统一社会信用代码：").append(code).append('\n');
         md.append("- 触发场景：").append(scenario).append('\n');
         md.append("- 综合结论：**").append(conclusion).append("**").append(incomplete ? "（证据不完整）" : "").append('\n');
-        md.append("- 证据来源：").append(String.join("、", sources)).append("\n\n");
+        md.append("- 证据来源：").append(sources == null || sources.isEmpty() ? "无" : String.join(" / ", sources)).append('\n');
+        md.append("- 研判时间：").append(when).append("\n\n");
         md.append("## 摘要\n\n").append(summary).append("\n\n");
-        md.append("## 检查清单\n\n| 编号 | 颜色 | 检查项 | 触发 | 依据 | 证据 |\n|---|---|---|---|---|---|\n");
-        for (Item i : items) {
-            md.append("| ").append(i.id()).append(" | ").append(colorLabel(i.color())).append(" | ")
-                    .append(i.title().replace('|', '/')).append(" | ").append(i.triggered() ? "是" : "否")
-                    .append(" | ").append(i.legalBasis().replace('|', '/')).append(" | ")
-                    .append(clip(i.evidence(), 80).replace('|', '/').replace('\n', ' ')).append(" |\n");
+        md.append("## 取证状态\n\n");
+        if (sources == null || sources.isEmpty()) md.append("- 无外部取证\n\n");
+        else {
+            for (String s : sources) md.append("- ").append(s).append("：").append(s.contains("未完成") ? "未完成" : "已接入").append('\n');
+            md.append('\n');
         }
-        md.append("\n## 整改与监控\n\n");
+        boolean mcp = false;
+        for (Evidence d : docs) {
+            if (d.source() == null || (!d.source().contains("企查") && !d.source().contains("天眼"))) continue;
+            if (!mcp) { md.append("## 工商 MCP 摘录\n\n"); mcp = true; }
+            md.append("### ").append(d.source()).append("\n\n").append(clip(d.text(), 2500)).append("\n\n");
+        }
+        if (aiNotes != null && !aiNotes.isBlank()) md.append("## AI 研判要点\n\n").append(aiNotes.trim()).append("\n\n");
+        for (String[] group : new String[][]{{"red", "一票否决项（红色）"}, {"orange", "重大违规项（橙色）"}, {"yellow", "关注事项（黄色）"}}) {
+            md.append("## ").append(group[1]).append("\n\n");
+            for (Item i : items) {
+                if (!group[0].equals(i.color())) continue;
+                md.append("- [").append(i.triggered() ? "☑ 触发" : "☐ 未触发").append("] ")
+                        .append(i.title()).append(" — ").append(i.legalBasis()).append('\n');
+                if (i.triggered() && i.evidence() != null && !i.evidence().isBlank()) {
+                    md.append("  - 证据：").append(i.evidence()).append('\n');
+                }
+            }
+            md.append('\n');
+        }
+        md.append("## 整改 / 监控清单\n\n");
         if (remediation.isEmpty()) md.append("- 无\n");
         else for (String r : remediation) md.append("- ").append(r).append('\n');
+        md.append("\n## 签批区\n\n- 复核人：________\n- 意见：________\n- 日期：________\n");
         if (incomplete || "待核验".equals(conclusion)) {
             md.append("\n> **警示**：证据不完整或结论为待核验时，不得按「通过」推进业务合作。\n");
         }
-        md.append("\n---\n*结论由规则清单给出，AI 说明不得改写结论。*\n");
         return md.toString();
+    }
+
+    private static int evidenceRank(String source) {
+        if (source == null) return 3;
+        if (source.contains("财报") || source.contains("上传")) return 0;
+        if (source.contains("企查") || source.contains("天眼")) return 1;
+        if (source.contains("全网")) return 2;
+        return 3;
     }
 
     private record Hit(boolean triggered, String evidence, String url) {}
@@ -293,14 +336,6 @@ public final class AdmissionCore {
             return penaltyGe100(text) || text.contains("公开通报") || text.contains("监管通报");
         }
         return true;
-    }
-
-    private static String colorLabel(String color) {
-        return switch (color) {
-            case "red" -> "红";
-            case "orange" -> "橙";
-            default -> "黄";
-        };
     }
 
     private static String clip(String s, int n) {
