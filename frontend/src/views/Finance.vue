@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api } from '../api'
 import AttachFiles from '../components/AttachFiles.vue'
 import ReportView from '../components/ReportView.vue'
@@ -41,7 +41,7 @@ async function start() {
   try {
     const body: any = {}
     if (partnerId.value) body.partnerId = partnerId.value
-    else body.partnerName = partnerName.value
+    if (partnerName.value.trim()) body.partnerName = partnerName.value.trim()
     if (period.value) body.period = period.value
     body.documentText = documentText.value
     current.value = await api.startFinance(body)
@@ -72,6 +72,11 @@ const shown = computed(() => {
   const s = q.value.trim().toLowerCase()
   if (!s) return rows.value
   return rows.value.filter((r) => String(r.partnerName || '').toLowerCase().includes(s))
+})
+
+watch(partnerId, (id) => {
+  const picked = partners.value.find((p) => p.id === id)
+  if (picked) partnerName.value = picked.name
 })
 
 onMounted(load)
@@ -105,9 +110,9 @@ onUnmounted(() => window.clearInterval(timer))
     <div v-if="composer" class="mask" @click.self="composer = false">
       <div class="dialog" role="dialog">
         <h3>新建经营报告</h3>
-        <div class="field"><label>机构</label>
+        <div class="field"><label>合作机构（可选）</label>
           <select v-model="partnerId">
-            <option value="">手动输入主体</option>
+            <option value="">自动识别 / 手动填写</option>
             <option v-for="p in partners" :key="p.id" :value="p.id">{{ p.name }}</option>
           </select>
         </div>
