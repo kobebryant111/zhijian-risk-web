@@ -3,7 +3,9 @@ package com.zhijian.risk.web;
 import com.zhijian.risk.dto.Dtos;
 import com.zhijian.risk.service.PartnerService;
 import jakarta.validation.Valid;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -36,5 +38,16 @@ public class PartnerController {
     public ApiResult<Void> delete(@PathVariable Long id) {
         partnerService.delete(AuthSupport.requireOrgId(), id);
         return ApiResult.ok(null);
+    }
+
+    @GetMapping("/import-template")
+    public ResponseEntity<byte[]> template() {
+        AuthSupport.requireOrgId();
+        return ExcelDownload.attachment(partnerService.template(), "机构名单导入模板.xlsx");
+    }
+
+    @PostMapping("/import")
+    public ApiResult<Dtos.ImportOutcome> importExcel(@RequestParam("file") MultipartFile file) {
+        return ApiResult.ok(partnerService.importExcel(AuthSupport.requireOrgId(), ExcelDownload.bytes(file)));
     }
 }

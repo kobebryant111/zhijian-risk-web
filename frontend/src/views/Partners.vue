@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { api, type PartnerView } from '../api'
+import ExcelActions from '../components/ExcelActions.vue'
+import { api, type ImportOutcome, type PartnerView } from '../api'
 import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
 const list = ref<PartnerView[]>([])
 const err = ref('')
+const notice = ref('')
+const importing = ref(false)
 const q = ref('')
 const open = ref(false)
 const editing = ref<PartnerView | null>(null)
@@ -89,6 +92,35 @@ async function save() {
   }
 }
 
+function importText(result: ImportOutcome) {
+  const head = `新增 ${result.created} 条，更新 ${result.updated} 条`
+  return result.errors?.length ? `${head}。${result.errors.join('；')}` : head
+}
+
+async function downloadTemplate() {
+  err.value = ''
+  try {
+    await api.downloadPartnerTemplate()
+  } catch (e) {
+    err.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+async function importFile(file: File) {
+  err.value = ''
+  notice.value = ''
+  importing.value = true
+  try {
+    const result = await api.importPartners(file)
+    notice.value = importText(result)
+    await load()
+  } catch (e) {
+    err.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    importing.value = false
+  }
+}
+
 async function remove(p: PartnerView) {
   if (!confirm(`删除「${p.name}」？`)) return
   try {
@@ -108,10 +140,12 @@ onMounted(load)
       <h1>机构名单</h1>
       <div class="toolbar" v-if="auth.currentOrgId">
         <input v-model="q" placeholder="搜索名称 / 简称" />
+        <ExcelActions :busy="importing" @download="downloadTemplate" @file="importFile" />
         <button class="btn" type="button" @click="openCreate">新建机构</button>
       </div>
     </div>
 
+    <div v-if="notice" class="import-note">{{ notice }}</div>
     <div v-if="!auth.currentOrgId" class="panel empty">请选择组织</div>
     <div v-else-if="err" class="panel empty">{{ err }}</div>
     <div v-else class="panel" style="padding: 4px 8px 8px">
@@ -162,3 +196,12 @@ onMounted(load)
     </div>
   </div>
 </template>
+
+<style scoped>
+.import-note {
+  margin: -4px 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+</style>

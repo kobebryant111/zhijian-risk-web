@@ -1,8 +1,11 @@
 package com.zhijian.risk.web;
 
 import com.zhijian.risk.domain.RiskRule;
+import com.zhijian.risk.dto.Dtos;
 import com.zhijian.risk.service.RuleService;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.Map;
@@ -38,5 +41,16 @@ public class RuleController {
     public ApiResult<Void> delete(@PathVariable Long id) {
         ruleService.delete(AuthSupport.requireOrgId(), id);
         return ApiResult.ok(null);
+    }
+
+    @GetMapping("/import-template")
+    public ResponseEntity<byte[]> template() {
+        AuthSupport.requireOrgId();
+        return ExcelDownload.attachment(ruleService.template(), "规则库导入模板.xlsx");
+    }
+
+    @PostMapping("/import")
+    public ApiResult<Dtos.ImportOutcome> importExcel(@RequestParam("file") MultipartFile file) {
+        return ApiResult.ok(ruleService.importExcel(AuthSupport.requireOrgId(), ExcelDownload.bytes(file)));
     }
 }

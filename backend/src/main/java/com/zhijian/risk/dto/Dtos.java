@@ -65,4 +65,7 @@ public class Dtos {
 
     public record PartnerView(
             Long id, String name, String alias, String partnerType, String status, String uscc, String updatedAt) {}
+
+    /** Excel 导入结果。errors 只列失败行，成功行已经写入。 */
+    public record ImportOutcome(int created, int updated, List<String> errors) {}
 }

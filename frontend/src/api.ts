@@ -20,8 +20,12 @@ http.interceptors.response.use(
     }
     return r
   },
-  (err) => {
-    const msg = err?.response?.data?.message || err.message || '请求失败'
+  async (err) => {
+    let data = err?.response?.data
+    if (typeof Blob !== 'undefined' && data instanceof Blob) {
+      try { data = JSON.parse(await data.text()) } catch { data = null }
+    }
+    const msg = data?.message || err.message || '请求失败'
     return Promise.reject(new Error(msg))
   },
 )
@@ -48,6 +52,22 @@ export type UserBrief = { id: number; username: string; displayName: string }
 export type PartnerView = {
   id: number; name: string; alias: string; partnerType: string; status: string; uscc: string; updatedAt: string
 }
+export type ImportOutcome = { created: number; updated: number; errors: string[] }
+
+function saveBlob(data: Blob, filename: string) {
+  const url = URL.createObjectURL(data)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function upload(path: string, file: File) {
+  const body = new FormData()
+  body.append('file', file)
+  return http.post<ImportOutcome>(path, body).then((r) => r.data)
+}
 
 export const api = {
   register: (body: { username: string; password: string; displayName: string }) =>
@@ -73,6 +93,9 @@ export const api = {
   createPartner: (body: object) => http.post<PartnerView>('/partners', body).then((r) => r.data),
   updatePartner: (id: number, body: object) => http.put<PartnerView>(`/partners/${id}`, body).then((r) => r.data),
   deletePartner: (id: number) => http.delete(`/partners/${id}`).then((r) => r.data),
+  downloadPartnerTemplate: () =>
+    http.get('/partners/import-template', { responseType: 'blob' }).then((r) => saveBlob(r.data, '机构名单导入模板.xlsx')),
+  importPartners: (file: File) => upload('/partners/import', file),
 
   overview: () => http.get<any>('/dashboard/overview').then((r) => r.data),
   listClues: (params?: object) => http.get<any[]>('/clues', { params }).then((r) => r.data),
@@ -82,6 +105,9 @@ export const api = {
   createRule: (body: object) => http.post<any>('/rules', body).then((r) => r.data),
   updateRule: (id: number, body: object) => http.put<any>(`/rules/${id}`, body).then((r) => r.data),
   deleteRule: (id: number) => http.delete(`/rules/${id}`).then((r) => r.data),
+  downloadRuleTemplate: () =>
+    http.get('/rules/import-template', { responseType: 'blob' }).then((r) => saveBlob(r.data, '规则库导入模板.xlsx')),
+  importRules: (file: File) => upload('/rules/import', file),
   listWhistleReports: () => http.get<any[]>('/whistle/reports').then((r) => r.data),
   getWhistleReport: (id: number) => http.get<any>(`/whistle/reports/${id}`).then((r) => r.data),
   startWhistleJob: (body: object = {}) => http.post<any>('/whistle/jobs', body).then((r) => r.data),

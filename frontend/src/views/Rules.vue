@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { api } from '../api'
+import ExcelActions from '../components/ExcelActions.vue'
+import { api, type ImportOutcome } from '../api'
 import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
 const rows = ref<any[]>([])
 const q = ref('')
+const err = ref('')
+const notice = ref('')
+const importing = ref(false)
 const open = ref(false)
 const empty = () => ({ ruleCode: '', riskPoint: '', partnerType: 'common', level: 3, triggerText: '', dataSource: '', legalBasis: '' })
 const form = ref(empty())
@@ -29,6 +33,35 @@ const shown = computed(() => {
 async function load() {
   if (!auth.currentOrgId) return
   rows.value = await api.listRules()
+}
+
+function importText(result: ImportOutcome) {
+  const head = `新增 ${result.created} 条，更新 ${result.updated} 条`
+  return result.errors?.length ? `${head}。${result.errors.join('；')}` : head
+}
+
+async function downloadTemplate() {
+  err.value = ''
+  try {
+    await api.downloadRuleTemplate()
+  } catch (e) {
+    err.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+async function importFile(file: File) {
+  err.value = ''
+  notice.value = ''
+  importing.value = true
+  try {
+    const result = await api.importRules(file)
+    notice.value = importText(result)
+    await load()
+  } catch (e) {
+    err.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    importing.value = false
+  }
 }
 
 function openCreate() {
@@ -65,9 +98,11 @@ onMounted(load)
       <h1>规则库</h1>
       <div class="toolbar" v-if="auth.currentOrgId">
         <input v-model="q" placeholder="搜索编码 / 风险点" />
+        <ExcelActions :busy="importing" @download="downloadTemplate" @file="importFile" />
         <button class="btn" type="button" @click="openCreate">新建规则</button>
       </div>
     </div>
+    <div v-if="notice || err" class="import-note">{{ err || notice }}</div>
     <div v-if="!auth.currentOrgId" class="panel empty">请选择组织</div>
     <div v-else class="panel" style="padding: 4px 8px 8px">
       <table class="table" v-if="shown.length">
@@ -111,3 +146,12 @@ onMounted(load)
     </div>
   </div>
 </template>
+
+<style scoped>
+.import-note {
+  margin: -4px 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+</style>

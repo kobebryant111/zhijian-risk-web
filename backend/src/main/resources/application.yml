@@ -12,6 +12,10 @@ spring:
     hikari:
       maximum-pool-size: 20
       minimum-idle: 2
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 5MB
 
   # JPA 已移除，改用 MyBatis-Plus
 

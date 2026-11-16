@@ -13,6 +13,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 /**
  * 全局异常收口，失败响应与成功响应使用同一信封。
@@ -46,6 +47,12 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResult<Void>> handleBadRequest(Exception e, HttpServletRequest request) {
         log.warn("api fail status=400 path={} requestId={} message={}", request.getRequestURI(), requestId(), e.getMessage());
         return ResponseEntity.badRequest().body(ApiResult.fail(400, "请求参数不正确"));
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiResult<Void>> handleUpload(MaxUploadSizeExceededException e, HttpServletRequest request) {
+        log.warn("api fail status=400 path={} requestId={} message={}", request.getRequestURI(), requestId(), e.getMessage());
+        return ResponseEntity.badRequest().body(ApiResult.fail(400, "文件不能超过 5MB"));
     }
 
     @ExceptionHandler(AccessDeniedException.class)
