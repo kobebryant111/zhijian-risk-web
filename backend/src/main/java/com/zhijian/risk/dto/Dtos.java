@@ -68,4 +68,9 @@ public class Dtos {
 
     /** Excel 导入结果。errors 只列失败行，成功行已经写入。 */
     public record ImportOutcome(int created, int updated, List<String> errors) {}
+
+    /** 设置页测试连接。apiKey 留空时用已保存的密钥。ok 为 false 时 message 是失败原因。 */
+    public record ConnectionTestReq(String target, String baseUrl, String model, String apiKey) {}
+
+    public record ConnectionTestResult(boolean ok, String message) {}
 }

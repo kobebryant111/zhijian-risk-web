@@ -124,4 +124,6 @@ export const api = {
   deleteConversation: (id: number) => http.delete(`/agent/conversations/${id}`).then((r) => r.data),
   getSettings: () => http.get<any>('/settings').then((r) => r.data),
   saveSettings: (body: object) => http.put<any>('/settings', body).then((r) => r.data),
+  testSettings: (body: { target: string; baseUrl?: string; model?: string; apiKey?: string }) =>
+    http.post<{ ok: boolean; message: string }>('/settings/test', body).then((r) => r.data),
 }

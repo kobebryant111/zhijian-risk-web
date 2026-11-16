@@ -12,6 +12,12 @@ const form = reactive({
 })
 const saving = ref(false)
 const msg = ref('')
+const tests = reactive({
+  llm: { busy: false, ok: false, message: '' },
+  baidu: { busy: false, ok: false, message: '' },
+  qcc: { busy: false, ok: false, message: '' },
+  tyc: { busy: false, ok: false, message: '' },
+})
 
 async function load() {
   if (!auth.currentOrgId) return
@@ -23,6 +29,30 @@ async function load() {
   form.baidu.useInBatch = view.value.baidu.useInBatch
   form.mcp.qccEnabled = view.value.mcp.qccEnabled
   form.mcp.tycEnabled = view.value.mcp.tycEnabled
+}
+
+async function test(target: 'llm' | 'baidu' | 'qcc' | 'tyc') {
+  const slot = tests[target]
+  slot.busy = true
+  slot.message = ''
+  try {
+    const result = await api.testSettings({
+      target,
+      baseUrl: target === 'llm' ? form.llm.baseUrl : undefined,
+      model: target === 'llm' ? form.llm.model : undefined,
+      apiKey: target === 'llm' ? form.llm.apiKey
+        : target === 'baidu' ? form.baidu.apiKey
+        : target === 'qcc' ? form.mcp.qccApiKey
+        : form.mcp.tycApiKey,
+    })
+    slot.ok = result.ok
+    slot.message = result.message
+  } catch (e) {
+    slot.ok = false
+    slot.message = e instanceof Error ? e.message : String(e)
+  } finally {
+    slot.busy = false
+  }
 }
 
 async function save() {
@@ -63,6 +93,10 @@ onMounted(load)
           <div class="field"><label>Base URL</label><input v-model="form.llm.baseUrl" /></div>
           <div class="field"><label>Model</label><input v-model="form.llm.model" /></div>
           <div class="field"><label>API Key</label><input v-model="form.llm.apiKey" type="password" placeholder="留空则不修改" /></div>
+          <div class="test-row">
+            <button class="btn secondary" type="button" :disabled="tests.llm.busy" @click="test('llm')">{{ tests.llm.busy ? '测试中' : '测试连接' }}</button>
+            <span v-if="tests.llm.message" :class="tests.llm.ok ? 'ok' : 'bad'">{{ tests.llm.message }}</span>
+          </div>
         </div>
         <div class="panel">
           <div class="block-head">
@@ -78,6 +112,10 @@ onMounted(load)
             <span>吹哨跑批时使用</span>
           </label>
           <div class="field"><label>API Key</label><input v-model="form.baidu.apiKey" type="password" placeholder="留空则不修改" /></div>
+          <div class="test-row">
+            <button class="btn secondary" type="button" :disabled="tests.baidu.busy" @click="test('baidu')">{{ tests.baidu.busy ? '测试中' : '测试连接' }}</button>
+            <span v-if="tests.baidu.message" :class="tests.baidu.ok ? 'ok' : 'bad'">{{ tests.baidu.message }}</span>
+          </div>
 
           <div class="block-head" style="margin-top:20px">
             <h3>工商数据源</h3>
@@ -86,12 +124,20 @@ onMounted(load)
             <input type="checkbox" v-model="form.mcp.qccEnabled" />
             <span>企查查</span>
           </label>
-          <div class="field"><label>企查查 Key</label><input v-model="form.mcp.qccApiKey" type="password" /></div>
+          <div class="field"><label>企查查 Key</label><input v-model="form.mcp.qccApiKey" type="password" placeholder="留空则不修改" /></div>
+          <div class="test-row">
+            <button class="btn secondary" type="button" :disabled="tests.qcc.busy" @click="test('qcc')">{{ tests.qcc.busy ? '测试中' : '测试连接' }}</button>
+            <span v-if="tests.qcc.message" :class="tests.qcc.ok ? 'ok' : 'bad'">{{ tests.qcc.message }}</span>
+          </div>
           <label class="switch row">
             <input type="checkbox" v-model="form.mcp.tycEnabled" />
             <span>天眼查</span>
           </label>
-          <div class="field"><label>天眼查 Key</label><input v-model="form.mcp.tycApiKey" type="password" /></div>
+          <div class="field"><label>天眼查 Key</label><input v-model="form.mcp.tycApiKey" type="password" placeholder="留空则不修改" /></div>
+          <div class="test-row">
+            <button class="btn secondary" type="button" :disabled="tests.tyc.busy" @click="test('tyc')">{{ tests.tyc.busy ? '测试中' : '测试连接' }}</button>
+            <span v-if="tests.tyc.message" :class="tests.tyc.ok ? 'ok' : 'bad'">{{ tests.tyc.message }}</span>
+          </div>
         </div>
       </div>
     </template>
@@ -151,4 +197,13 @@ h3 { margin: 0; font-size: 15px; }
   font-size: 13px;
   font-weight: 600;
 }
+.test-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+.test-row .btn { height: 32px; padding: 0 12px; }
+.test-row .ok { color: var(--ok); font-size: 13px; }
+.test-row .bad { color: var(--danger, #d14343); font-size: 13px; line-height: 1.5; }
 </style>

@@ -3,11 +3,19 @@ package com.zhijian.risk.service;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.zhijian.risk.client.BaiduSearchClient;
+import com.zhijian.risk.client.LlmClient;
+import com.zhijian.risk.client.McpProbe;
 import com.zhijian.risk.domain.OrgSetting;
+import com.zhijian.risk.dto.Dtos;
+import com.zhijian.risk.engine.SearchCore;
 import com.zhijian.risk.mapper.OrgSettingMapper;
+import com.zhijian.risk.web.ApiException;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.net.URI;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
@@ -32,8 +40,14 @@ public class SettingsService {
     public static final String TYC_ENABLED = "tyc.enabled";
 
     private final OrgSettingMapper repo;
+    private final LlmClient llmClient;
+    private final BaiduSearchClient baiduSearchClient;
 
-    public SettingsService(OrgSettingMapper repo) { this.repo = repo; }
+    public SettingsService(OrgSettingMapper repo, LlmClient llmClient, BaiduSearchClient baiduSearchClient) {
+        this.repo = repo;
+        this.llmClient = llmClient;
+        this.baiduSearchClient = baiduSearchClient;
+    }
 
     /**
      * 按 ID 查询详情。
@@ -140,5 +154,92 @@ public class SettingsService {
         log.debug("llmReady orgId={}", orgId);
 
         return "true".equalsIgnoreCase(get(orgId, LLM_ENABLED, "false")) && !get(orgId, LLM_KEY, "").isBlank();
+    }
+
+    /**
+     * 用当前表单或已保存的密钥打一次真实请求。不把密钥写入日志。
+     */
+    public Dtos.ConnectionTestResult test(Long orgId, Dtos.ConnectionTestReq req) {
+        String target = req == null || req.target() == null ? "" : req.target().trim();
+        log.info("test connection orgId={} target={}", orgId, target);
+        return switch (target) {
+            case "llm" -> testLlm(orgId, req);
+            case "baidu" -> testBaidu(orgId, req);
+            case "qcc" -> testQcc(orgId, req);
+            case "tyc" -> testTyc(orgId, req);
+            default -> throw new ApiException(HttpStatus.BAD_REQUEST, "未知的连接类型");
+        };
+    }
+
+    private Dtos.ConnectionTestResult testLlm(Long orgId, Dtos.ConnectionTestReq req) {
+        String baseUrl = first(req.baseUrl(), get(orgId, LLM_BASE, ""));
+        String model = first(req.model(), get(orgId, LLM_MODEL, ""));
+        String key = first(req.apiKey(), get(orgId, LLM_KEY, ""));
+        if (baseUrl.isBlank()) return fail("请填写 Base URL", key);
+        if (model.isBlank()) return fail("请填写模型名", key);
+        if (key.isBlank()) return fail("请填写 API Key", key);
+        if (!httpUrl(baseUrl)) return fail("Base URL 需要以 http:// 或 https:// 开头", key);
+        try {
+            llmClient.ping(baseUrl, key, model);
+            return new Dtos.ConnectionTestResult(true, "连接成功");
+        } catch (ApiException e) {
+            return fail(e.getMessage(), key);
+        }
+    }
+
+    private Dtos.ConnectionTestResult testBaidu(Long orgId, Dtos.ConnectionTestReq req) {
+        String key = first(req.apiKey(), get(orgId, BAIDU_KEY, ""));
+        if (key.isBlank()) return fail("请填写 API Key", key);
+        BaiduSearchClient.SearchResult result = baiduSearchClient.searchDetailed(
+                key, "连接测试", new SearchCore.SearchOpts(1, null, null, null, null, null, false));
+        if (result.error() != null) return fail(result.error(), key);
+        return new Dtos.ConnectionTestResult(true, "连接成功");
+    }
+
+    private Dtos.ConnectionTestResult testQcc(Long orgId, Dtos.ConnectionTestReq req) {
+        String key = first(req.apiKey(), get(orgId, QCC_KEY, ""));
+        if (key.isBlank()) return fail("请填写 API Key", key);
+        String auth = key.toLowerCase().startsWith("bearer ") ? key.trim() : "Bearer " + key.trim();
+        return mcp(McpProbe.QCC_COMPANY, auth, "企查查", key);
+    }
+
+    private Dtos.ConnectionTestResult testTyc(Long orgId, Dtos.ConnectionTestReq req) {
+        String key = first(req.apiKey(), get(orgId, TYC_KEY, ""));
+        if (key.isBlank()) return fail("请填写 API Key", key);
+        String raw = key.trim();
+        Dtos.ConnectionTestResult firstTry = mcp(McpProbe.TYC, raw, "天眼查", key);
+        if (firstTry.ok() || raw.toLowerCase().startsWith("bearer ")) return firstTry;
+        Dtos.ConnectionTestResult bearer = mcp(McpProbe.TYC, "Bearer " + raw, "天眼查", key);
+        return bearer.ok() ? bearer : firstTry;
+    }
+
+    private Dtos.ConnectionTestResult mcp(String url, String authorization, String name, String secret) {
+        try {
+            int tools = McpProbe.connect(url, authorization);
+            return new Dtos.ConnectionTestResult(true, name + "连接成功，" + tools + " 个工具");
+        } catch (IllegalArgumentException e) {
+            return fail(e.getMessage(), secret);
+        }
+    }
+
+    private static String first(String typed, String saved) {
+        if (typed != null && !typed.isBlank()) return typed.trim();
+        return saved == null ? "" : saved.trim();
+    }
+
+    private static boolean httpUrl(String url) {
+        try {
+            String scheme = URI.create(url).getScheme();
+            return "http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static Dtos.ConnectionTestResult fail(String message, String secret) {
+        String text = message == null ? "连接失败" : message.replace('\n', ' ').trim();
+        if (secret != null && secret.length() >= 6) text = text.replace(secret, "***");
+        if (text.length() > 180) text = text.substring(0, 180) + "…";
+        return new Dtos.ConnectionTestResult(false, text.isBlank() ? "连接失败" : text);
     }
 }

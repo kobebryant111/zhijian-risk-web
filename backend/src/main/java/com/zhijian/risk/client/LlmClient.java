@@ -76,4 +76,38 @@ public class LlmClient {
             throw new ApiException(HttpStatus.BAD_GATEWAY, "LLM 调用异常: " + e.getMessage());
         }
     }
+
+    /**
+     * 用一句极短对话确认地址、模型和密钥可用。超时 20 秒，不要求模型吐出长文。
+     */
+    public void ping(String baseUrl, String apiKey, String model) {
+        try {
+            String url = baseUrl.replaceAll("/$", "") + "/chat/completions";
+            ObjectNode body = mapper.createObjectNode();
+            body.put("model", model);
+            body.put("max_tokens", 8);
+            ArrayNode arr = body.putArray("messages");
+            ObjectNode message = arr.addObject();
+            message.put("role", "user");
+            message.put("content", "ping");
+            HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(url))
+                    .timeout(Duration.ofSeconds(20))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)));
+            if (apiKey != null && !apiKey.isBlank()) builder.header("Authorization", "Bearer " + apiKey);
+            HttpResponse<String> resp = http.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() >= 400) {
+                throw new ApiException(HttpStatus.BAD_GATEWAY, "HTTP " + resp.statusCode());
+            }
+            JsonNode root = mapper.readTree(resp.body());
+            if (root.has("error")) {
+                String text = root.path("error").path("message").asText("大模型返回错误");
+                throw new ApiException(HttpStatus.BAD_GATEWAY, text);
+            }
+        } catch (ApiException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "网络错误: " + e.getMessage());
+        }
+    }
 }

@@ -1,5 +1,6 @@
 package com.zhijian.risk.web;
 
+import com.zhijian.risk.dto.Dtos;
 import com.zhijian.risk.service.SettingsService;
 import org.springframework.web.bind.annotation.*;
 
@@ -25,5 +26,10 @@ public class SettingsController {
         Long orgId = AuthSupport.requireOrgId();
         settingsService.saveAll(orgId, body);
         return ApiResult.ok(settingsService.publicView(orgId));
+    }
+
+    @PostMapping("/test")
+    public ApiResult<Dtos.ConnectionTestResult> test(@RequestBody Dtos.ConnectionTestReq req) {
+        return ApiResult.ok(settingsService.test(AuthSupport.requireOrgId(), req));
     }
 }
