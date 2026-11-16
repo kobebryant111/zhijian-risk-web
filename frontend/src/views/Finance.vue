@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from '../api'
+import AttachFiles from '../components/AttachFiles.vue'
 import ReportView from '../components/ReportView.vue'
 import { useAuthStore } from '../stores/auth'
 
@@ -100,7 +101,11 @@ onUnmounted(() => window.clearInterval(timer))
         </div>
         <div class="field" v-if="!partnerId"><label>主体名称</label><input v-model="partnerName" /></div>
         <div class="field"><label>报告期间</label><input v-model="period" placeholder="如 2025全年，可留空由正文识别" /></div>
-        <div class="field"><label>财报正文</label><textarea v-model="documentText" rows="8" placeholder="粘贴审计报告、年报或季报正文"></textarea></div>
+        <AttachFiles
+          v-model="documentText"
+          heading="财报附件"
+          hint="拖拽到此处或点击选择。支持 .docx / .xlsx / .xls / .csv / .txt。解析后的正文会交给经营分析。"
+        />
         <div class="dialog-actions">
           <button class="btn secondary" type="button" @click="composer = false">取消</button>
           <button class="btn" type="button" :disabled="busy" @click="start">{{ busy ? '生成中…' : '生成' }}</button>

@@ -148,6 +148,15 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .dialog .field input,
 .dialog .field textarea { width: 100%; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.dropzone { border: 1px dashed var(--line); border-radius: 8px; padding: 14px; background: #f7f9fc; }
+.dropzone.over { border-color: var(--accent); background: var(--accent-soft); }
+.drop-title { font-weight: 600; font-size: 14px; }
+.drop-hint { font-size: 12px; margin-top: 4px; }
+.drop-files { margin-top: 8px; font-size: 12px; color: var(--accent); font-weight: 600; }
+.drop-actions { display: flex; gap: 8px; margin-top: 10px; }
+.drop-note { margin: 8px 0 0; font-size: 12px; color: var(--ok); }
+.drop-err { margin: 8px 0 0; font-size: 12px; color: var(--danger); }
+.ready-line { margin-top: 8px; font-size: 12px; color: var(--muted); }
 
 .panel {
   background: var(--card);

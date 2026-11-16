@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from '../api'
+import AttachFiles from '../components/AttachFiles.vue'
 import ReportView from '../components/ReportView.vue'
 import { useAuthStore } from '../stores/auth'
 
@@ -11,12 +12,35 @@ const form = ref({ partnerName: '', partnerType: 'loan', scenario: '准入', mat
 const busy = ref(false)
 const composer = ref(false)
 const q = ref('')
+const ready = ref({ web: false, mcp: false })
 let timer: number | undefined
+
+function guessType(name: string) {
+  if (/担保|融担|再担保/.test(name)) return 'guarantee'
+  if (/催收|清收|委外/.test(name)) return 'collection'
+  if (/支付|清算/.test(name)) return 'payment'
+  if (/数据|征信|评分/.test(name)) return 'data'
+  if (/科技|流量|营销|导流/.test(name)) return 'traffic'
+  if (/同业|金市|银行间/.test(name)) return 'interbank'
+  if (/运营|客服|电销|辅助/.test(name)) return 'ops'
+  return 'loan'
+}
+
+function onName() {
+  if (form.value.partnerName.trim()) form.value.partnerType = guessType(form.value.partnerName)
+}
 
 async function load() {
   if (!auth.currentOrgId) return
   rows.value = await api.listAdmission()
   if (current.value?.id) current.value = await api.getAdmission(current.value.id)
+  try {
+    const view = await api.getSettings()
+    ready.value = {
+      web: !!view?.baidu?.ready,
+      mcp: !!(view?.mcp?.qccReady || view?.mcp?.tycReady),
+    }
+  } catch { /* 未登录或设置读取失败时仍可发起，评审按未配置处理 */ }
 }
 
 async function start() {
@@ -80,9 +104,9 @@ onUnmounted(() => window.clearInterval(timer))
     </div>
 
     <div v-if="composer" class="mask" @click.self="composer = false">
-      <div class="dialog" role="dialog">
+      <div class="dialog wide" role="dialog">
         <h3>新建评审</h3>
-        <div class="field"><label>主体名称</label><input v-model="form.partnerName" placeholder="拟准入机构全称" /></div>
+        <div class="field"><label>主体名称</label><input v-model="form.partnerName" placeholder="拟准入机构全称" @input="onName" /></div>
         <div class="field"><label>类型</label>
           <select v-model="form.partnerType">
             <option value="loan">助贷</option>
@@ -91,15 +115,25 @@ onUnmounted(() => window.clearInterval(timer))
             <option value="payment">支付</option>
             <option value="data">数据</option>
             <option value="traffic">引流</option>
+            <option value="interbank">金市同业</option>
+            <option value="ops">运营辅助</option>
           </select>
         </div>
         <div class="field"><label>场景</label>
           <select v-model="form.scenario"><option>准入</option><option>续签</option><option>扩围</option></select>
         </div>
-        <div class="field"><label>尽调材料</label><textarea v-model="form.materialsText" rows="8" placeholder="可粘贴尽调说明、财报或处罚文书"></textarea></div>
+        <AttachFiles
+          v-model="form.materialsText"
+          multiple
+          heading="财报 / 尽调附件（可选）"
+          hint="拖拽到此处或点击选择，可多选。支持 .docx / .xlsx / .xls / .csv / .txt / .md / .json。暂不支持 PDF 和旧版 .doc。"
+        />
+        <p class="ready-line">
+          全网搜 {{ ready.web ? '已就绪' : '未配置' }} · 企查查/天眼查 {{ ready.mcp ? '已就绪' : '未配置' }}
+        </p>
         <div class="dialog-actions">
           <button class="btn secondary" type="button" @click="composer = false">取消</button>
-          <button class="btn" type="button" :disabled="busy" @click="start">{{ busy ? '提交中…' : '发起' }}</button>
+          <button class="btn" type="button" :disabled="busy" @click="start">{{ busy ? '分析中…' : '开始准入分析' }}</button>
         </div>
       </div>
     </div>
