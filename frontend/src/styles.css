@@ -63,6 +63,12 @@ button, input, select, textarea { font: inherit; color: inherit; }
   background-repeat: no-repeat;
   background-position: 10px center;
 }
+.page-head .toolbar input.date-field {
+  width: 148px;
+  flex-basis: 148px;
+  padding: 0 8px;
+  background-image: none;
+}
 .page-head .toolbar select {
   height: 32px;
   width: auto;
@@ -157,11 +163,39 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .drop-note { margin: 8px 0 0; font-size: 12px; color: var(--ok); }
 .drop-err { margin: 8px 0 0; font-size: 12px; color: var(--danger); }
 .ready-line { margin-top: 8px; font-size: 12px; color: var(--muted); }
-.partner-picks { max-height: 168px; overflow: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin-top: 8px; font-size: 13px; }
-.schedule-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.schedule-row { display: flex; align-items: center; gap: 8px; background: #f7f9fc; border-radius: 8px; padding: 8px 10px; }
-.schedule-row input[type="time"] { width: auto; }
-.level-picks { display: flex; gap: 6px; flex-wrap: wrap; }
+.panel.setup { flex: none; margin-bottom: 12px; }
+.block-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.block-head h2 { margin: 0; font-size: 14px; font-weight: 650; }
+.block-head p { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+.block-actions { display: flex; align-items: center; gap: 10px; flex: none; }
+.block-actions .drop-note, .block-actions .drop-err { margin: 0; }
+.schedule-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.sched-card { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; background: #f7f9fc; display: flex; flex-direction: column; gap: 10px; }
+.sched-card.on { background: var(--accent-soft); border-color: #d6e6ff; }
+.sched-top { display: flex; align-items: center; gap: 8px; font-weight: 650; width: fit-content; }
+.sched-field, .sched-fields { display: flex; align-items: center; gap: 8px; }
+.sched-field span { font-size: 12px; color: var(--muted); font-weight: 600; }
+.sched-card input[type="time"], .sched-card select { height: 32px; width: auto; margin: 0; padding: 0 10px; border-radius: 6px; background-color: #fff; }
+.sched-card input[type="time"] { width: 132px; }
+.sched-card select { min-width: 96px; flex: 1; }
+.scope-row { display: flex; align-items: center; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+.scope-label { font-size: 12px; color: var(--muted); font-weight: 600; }
+.seg { display: inline-flex; background: #f1f4f9; border-radius: 6px; padding: 2px; gap: 2px; }
+.seg button { border: 0; background: transparent; height: 28px; padding: 0 12px; border-radius: 4px; font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer; }
+.seg button.on { background: #fff; color: var(--ink); box-shadow: 0 1px 2px rgba(17, 24, 39, 0.08); }
+.seg button:disabled { opacity: 0.45; cursor: not-allowed; }
+.partner-picks { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; max-height: 168px; overflow: auto; }
+.partner-picks label { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-size: 13px; background: #fff; cursor: pointer; }
+.partner-picks label.on { border-color: #bfd6fb; background: var(--accent-soft); color: var(--accent-deep); }
+.board { padding: 0; overflow: hidden; flex: 1; }
+.board-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 0 16px; border-bottom: 1px solid var(--line); }
+.board-head .tabs { border-bottom: 0; margin: 0; }
+.board-body { padding: 4px 8px 12px; min-height: 220px; }
+.board-tools { display: flex; align-items: center; gap: 8px; }
+.board-tools input.search { width: 200px; flex: none; height: 32px; padding: 0 12px 0 32px; border-radius: 4px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%239aa3b2' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M20 20l-3.5-3.5'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: 10px center; }
+.clue-actions { display: flex; align-items: center; gap: 10px; margin: 12px 0; }
+tr.click { cursor: pointer; }
+tr.click:hover td { background: #f7f9fc; }
 .mini-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
 .mini-table th, .mini-table td { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: left; }
 
@@ -286,6 +320,17 @@ select {
   min-width: 120px;
   width: auto;
 }
+.sched-field, .sched-fields { width: fit-content; }
+.sched-field span { flex: none; white-space: nowrap; }
+.sched-card input[type="time"],
+.sched-card select {
+  width: auto;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 6px;
+}
+.sched-card input[type="time"] { width: 148px; flex: none; }
+.sched-card select { min-width: 96px; flex: none; padding-right: 28px; }
 textarea { resize: vertical; min-height: 88px; }
 
 .toolbar {

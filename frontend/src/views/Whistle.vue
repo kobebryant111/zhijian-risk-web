@@ -15,6 +15,8 @@ const onDate = ref(new Date().toISOString().slice(0, 10))
 const allPartners = ref(true)
 const picked = ref<number[]>([])
 const levelFilter = ref<'all' | number>('all')
+const tab = ref<'reports' | 'clues'>('reports')
+const levels = ['all', 1, 2, 3, 4] as const
 const schedule = ref({ dailyEnabled: true, dailyTime: '08:00', weeklyEnabled: true, weeklyDow: 1, weeklyTime: '09:00' })
 const msg = ref('')
 const err = ref('')
@@ -99,6 +101,16 @@ function toggle(id: number) {
   picked.value = picked.value.includes(id) ? picked.value.filter((x) => x !== id) : [...picked.value, id]
 }
 
+function statusClass(s: string) {
+  if (s === 'done' || s === '已关闭' || s === '已闭环') return 'ok'
+  if (s === 'failed' || s === '待复核') return 'danger'
+  return ''
+}
+
+function pickLevel(lv: 'all' | number) {
+  levelFilter.value = lv
+}
+
 async function setLevel(level: number) {
   if (!selected.value) return
   selected.value = await api.updateClue(selected.value.id, { level })
@@ -120,77 +132,103 @@ onUnmounted(() => window.clearInterval(timer))
     <div class="page-head">
       <h1>风险吹哨</h1>
       <div class="toolbar" v-if="auth.currentOrgId">
-        <input v-model="onDate" type="date" />
+        <input v-model="onDate" class="date-field" type="date" />
         <button class="btn secondary" type="button" :disabled="!!kindBusy" @click="run('daily')">{{ kindBusy === 'daily' ? '生成中…' : '出日报' }}</button>
         <button class="btn secondary" type="button" :disabled="!!kindBusy" @click="run('weekly')">{{ kindBusy === 'weekly' ? '生成中…' : '出周报' }}</button>
       </div>
     </div>
     <div v-if="!auth.currentOrgId" class="panel empty">请选择组织</div>
     <template v-else>
-      <div class="panel" style="margin-bottom: 12px">
-        <div class="row-actions" style="justify-content: space-between; margin-bottom: 10px">
-          <strong>跑批设置</strong>
-          <button class="btn secondary" type="button" @click="saveSchedule">保存定时</button>
+      <div class="panel setup">
+        <div class="block-head">
+          <div>
+            <h2>跑批设置</h2>
+            <p>到点按所选范围自动出报，改完要点保存定时。</p>
+          </div>
+          <div class="block-actions">
+            <span v-if="msg" class="drop-note">{{ msg }}</span>
+            <span v-if="err" class="drop-err">{{ err }}</span>
+            <button class="btn secondary" type="button" @click="saveSchedule">保存定时</button>
+          </div>
         </div>
         <div class="schedule-grid">
-          <label class="schedule-row"><input type="checkbox" v-model="schedule.dailyEnabled" /> 日报 <input type="time" v-model="schedule.dailyTime" /></label>
-          <label class="schedule-row">
-            <input type="checkbox" v-model="schedule.weeklyEnabled" /> 周报
-            <select v-model.number="schedule.weeklyDow">
-              <option :value="1">周一</option><option :value="2">周二</option><option :value="3">周三</option>
-              <option :value="4">周四</option><option :value="5">周五</option><option :value="6">周六</option><option :value="7">周日</option>
-            </select>
-            <input type="time" v-model="schedule.weeklyTime" />
+          <div class="sched-card" :class="{ on: schedule.dailyEnabled }">
+            <label class="sched-top"><input type="checkbox" v-model="schedule.dailyEnabled" /> 日报</label>
+            <label class="sched-field"><span>每天</span><input type="time" v-model="schedule.dailyTime" /></label>
+          </div>
+          <div class="sched-card" :class="{ on: schedule.weeklyEnabled }">
+            <label class="sched-top"><input type="checkbox" v-model="schedule.weeklyEnabled" /> 周报</label>
+            <div class="sched-fields">
+              <select v-model.number="schedule.weeklyDow">
+                <option :value="1">周一</option><option :value="2">周二</option><option :value="3">周三</option>
+                <option :value="4">周四</option><option :value="5">周五</option><option :value="6">周六</option><option :value="7">周日</option>
+              </select>
+              <input type="time" v-model="schedule.weeklyTime" />
+            </div>
+          </div>
+        </div>
+        <div class="scope-row">
+          <span class="scope-label">范围</span>
+          <div class="seg">
+            <button type="button" :class="{ on: allPartners }" @click="allPartners = true">全部机构</button>
+            <button type="button" :class="{ on: !allPartners }" :disabled="!partners.length" @click="allPartners = false">指定机构</button>
+          </div>
+          <span v-if="!partners.length" class="muted">请先在机构名单导入合作机构</span>
+          <span v-else-if="!allPartners" class="muted">已选 {{ picked.length }} 家</span>
+        </div>
+        <div v-if="!allPartners && partners.length" class="partner-picks">
+          <label v-for="p in partners" :key="p.id" :class="{ on: picked.includes(p.id) }">
+            <input type="checkbox" :checked="picked.includes(p.id)" @change="toggle(p.id)" /> {{ p.name }}
           </label>
         </div>
-        <label class="schedule-row" style="margin-top: 10px; width: fit-content"><input type="checkbox" v-model="allPartners" /> 全部机构</label>
-        <div v-if="!allPartners" class="partner-picks">
-          <label v-for="p in partners" :key="p.id"><input type="checkbox" :checked="picked.includes(p.id)" @change="toggle(p.id)" /> {{ p.name }}</label>
-        </div>
-        <p v-if="!partners.length" class="ready-line">请先在机构名单导入合作机构。</p>
-        <p v-if="msg" class="drop-note">{{ msg }}</p>
-        <p v-if="err" class="drop-err">{{ err }}</p>
       </div>
 
-      <div class="panel" style="padding: 4px 8px 8px; margin-bottom: 12px">
-        <div class="row-actions" style="padding: 8px">
-          <strong>报告</strong>
-          <input v-model="q" placeholder="搜索报告" />
+      <div class="panel board">
+        <div class="board-head">
+          <div class="tabs">
+            <button type="button" :class="{ on: tab === 'reports' }" @click="tab = 'reports'">报告</button>
+            <button type="button" :class="{ on: tab === 'clues' }" @click="tab = 'clues'">线索</button>
+          </div>
+          <div class="board-tools">
+            <input v-if="tab === 'reports'" v-model="q" class="search" placeholder="搜索报告" />
+            <template v-else>
+              <span class="badge" :class="alerts.length ? 'danger' : ''">待处置 {{ alerts.length }}</span>
+              <div class="seg">
+                <button v-for="lv in levels" :key="String(lv)" type="button" :class="{ on: levelFilter === lv }" @click="pickLevel(lv)">
+                  {{ lv === 'all' ? '全部' : 'L' + lv }}
+                </button>
+              </div>
+            </template>
+          </div>
         </div>
-        <table class="table" v-if="shown.length">
-          <thead><tr><th>报告</th><th>状态</th><th>线索</th><th>L1 / L2</th></tr></thead>
-          <tbody>
-            <tr v-for="r in shown" :key="r.id" style="cursor:pointer" @click="open(r)">
-              <td>{{ r.title }}</td>
-              <td>{{ r.status }} {{ r.progress }}%</td>
-              <td>{{ r.clueCount }}</td>
-              <td>{{ r.level1 }} / {{ r.level2 }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <div v-else class="empty">暂无报告。选择机构后点出日报或出周报。</div>
-      </div>
-
-      <div class="panel" style="padding: 4px 8px 8px">
-        <div class="row-actions" style="padding: 8px">
-          <strong>线索</strong>
-          <span class="muted">待处置 1/2 级 {{ alerts.length }}</span>
-          <button v-for="lv in ['all', 1, 2, 3, 4]" :key="String(lv)" class="btn secondary" type="button" @click="levelFilter = lv === 'all' ? 'all' : Number(lv)">
-            {{ lv === 'all' ? '全部' : 'L' + lv }}
-          </button>
+        <div v-show="tab === 'reports'" class="board-body">
+          <table class="table" v-if="shown.length">
+            <thead><tr><th>报告</th><th>状态</th><th>线索</th><th>L1 / L2</th></tr></thead>
+            <tbody>
+              <tr v-for="r in shown" :key="r.id" class="click" @click="open(r)">
+                <td>{{ r.title }}</td>
+                <td><span class="badge" :class="statusClass(r.status)">{{ r.status }}</span> <span class="muted">{{ r.progress }}%</span></td>
+                <td>{{ r.clueCount }}</td>
+                <td>{{ r.level1 }} / {{ r.level2 }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-else class="empty">暂无报告。选好日期后点出日报或出周报。</div>
         </div>
-        <table class="table" v-if="filteredClues.length">
-          <thead><tr><th>等级</th><th>主体</th><th>标题</th><th>状态</th></tr></thead>
-          <tbody>
-            <tr v-for="c in filteredClues" :key="c.id" style="cursor:pointer" @click="selected = c; current = null">
-              <td>L{{ c.level }}</td>
-              <td>{{ c.partnerName }}</td>
-              <td>{{ c.title }}</td>
-              <td>{{ c.status }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <div v-else class="empty">暂无线索</div>
+        <div v-show="tab === 'clues'" class="board-body">
+          <table class="table" v-if="filteredClues.length">
+            <thead><tr><th>等级</th><th>主体</th><th>标题</th><th>状态</th></tr></thead>
+            <tbody>
+              <tr v-for="c in filteredClues" :key="c.id" class="click" @click="selected = c; current = null">
+                <td><span class="badge" :class="'l' + c.level">L{{ c.level }}</span></td>
+                <td>{{ c.partnerName }}</td>
+                <td>{{ c.title }}</td>
+                <td><span class="badge" :class="statusClass(c.status)">{{ c.status }}</span></td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-else class="empty">暂无线索</div>
+        </div>
       </div>
     </template>
 
@@ -210,8 +248,10 @@ onUnmounted(() => window.clearInterval(timer))
         <h3>{{ selected.title }}</h3>
         <p class="ready-line">{{ selected.partnerName }} · L{{ selected.level }} · {{ selected.status }}</p>
         <p>{{ selected.summary }}</p>
-        <div class="level-picks">
-          <button v-for="lv in [1, 2, 3, 4]" :key="lv" class="btn secondary" type="button" @click="setLevel(lv)">改为 L{{ lv }}</button>
+        <div class="clue-actions">
+          <div class="seg">
+            <button v-for="lv in [1, 2, 3, 4]" :key="lv" type="button" :class="{ on: selected.level === lv }" @click="setLevel(lv)">L{{ lv }}</button>
+          </div>
           <button class="btn secondary" type="button" @click="closeClue">人工关闭</button>
         </div>
         <div class="dialog-actions">
