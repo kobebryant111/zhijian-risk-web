@@ -129,11 +129,15 @@ public class AdmissionService {
             }
             String baiduKey = settings.get(orgId, SettingsService.BAIDU_KEY, "");
             boolean baiduOn = "true".equalsIgnoreCase(settings.get(orgId, SettingsService.BAIDU_ENABLED, "false")) && !baiduKey.isBlank();
+            int fetched = 0;
+            int keptTotal = 0;
+            List<String> adopted = new ArrayList<>();
+            List<String> skipped = new ArrayList<>();
+            String baiduErr = null;
             if (baiduOn) {
                 List<String> aliases = AdmissionCore.aliases(name);
                 SearchCore.SearchOpts opts = SearchCore.lastSemiyear(8);
                 int calls = 0;
-                String baiduErr = null;
                 for (String q : SearchCore.admissionQueries(name)) {
                     if (calls++ >= SearchCore.MAX_CALLS_PER_OPERATION) break;
                     BaiduSearchClient.SearchResult result = baidu.searchDetailed(baiduKey, q, opts);
@@ -141,20 +145,27 @@ public class AdmissionService {
                         if (baiduErr == null) baiduErr = result.error();
                         continue;
                     }
-                    int kept = 0;
+                    fetched += result.hits().size();
                     for (BaiduSearchClient.RawRef h : result.hits()) {
                         String text = h.title() + " " + h.content();
-                        if (!AdmissionCore.webHitUsable(h.title(), h.url(), text, aliases)) continue;
-                        kept++;
+                        String reason = AdmissionCore.webSkipReason(h.title(), h.url(), text, aliases);
+                        if (reason != null) {
+                            if (skipped.size() < 8) skipped.add(clip(h.title().isBlank() ? h.url() : h.title()) + "（" + reason + "）");
+                            continue;
+                        }
+                        keptTotal++;
+                        if (adopted.size() < 8) adopted.add(clip(h.title().isBlank() ? h.url() : h.title()));
                         int level = switch (SearchCore.credibility(h.url())) { case "A" -> 1; case "B" -> 2; default -> 3; };
                         docs.add(new AdmissionCore.Evidence("全网搜", text, h.url(), level));
                     }
-                    if (kept > 0 && !sources.contains("全网搜")) sources.add("全网搜");
+                    if (keptTotal > 0 && !sources.contains("全网搜")) sources.add("全网搜");
                 }
                 if (baiduErr != null) {
                     docs.add(new AdmissionCore.Evidence("全网搜", "全网搜提示：" + clip(baiduErr), "", 3));
                 }
+                log.info("admission web fetched={} kept={}", fetched, keptTotal);
             }
+            String webDigest = webDigest(baiduOn, fetched, keptTotal, baiduErr, adopted, skipped);
             patch(id, 55, "running", "正在查询企查查、天眼查…", null, null, null, null, null, true);
             String query = registryQuery(orgId, name);
             pullEnterprise(id, "企查查", settings.get(orgId, SettingsService.QCC_ENABLED, "false"),
@@ -182,7 +193,7 @@ public class AdmissionService {
                     aiNotes = "AI 辅助未完成：" + e.getMessage();
                 }
             }
-            String markdown = AdmissionCore.opinion(name, type, usccOf(orgId, name), scenario, review, summary, aiNotes, docs);
+            String markdown = AdmissionCore.opinion(name, type, usccOf(orgId, name), scenario, review, summary, aiNotes, webDigest, docs);
             List<Map<String, Object>> items = new ArrayList<>();
             for (AdmissionCore.Item i : review.items()) {
                 items.add(Map.of("id", i.id(), "color", i.color(), "item", i.title(), "legalBasis", i.legalBasis(),
@@ -270,6 +281,18 @@ public class AdmissionService {
 
     private static String bearer(String key) {
         return key.regionMatches(true, 0, "Bearer ", 0, 7) ? key : "Bearer " + key;
+    }
+
+    private static String webDigest(boolean enabled, int fetched, int kept, String error, List<String> adopted, List<String> skipped) {
+        if (!enabled) return "未启用百度搜索。";
+        StringBuilder text = new StringBuilder();
+        if (error != null && fetched == 0) text.append("检索失败：").append(clip(error)).append('\n');
+        else text.append("返回 ").append(fetched).append(" 条，采纳 ").append(kept)
+                .append(" 条。采纳条件与桌面端相同：正文点名本公司，且标题含风险词；宣传稿不采纳。\n");
+        if (error != null && fetched > 0) text.append("部分检索未完成：").append(clip(error)).append('\n');
+        for (String line : adopted) text.append("- 采纳：").append(line).append('\n');
+        for (String line : skipped) text.append("- 未采纳：").append(line).append('\n');
+        return text.toString();
     }
 
     private static String clip(String text) {

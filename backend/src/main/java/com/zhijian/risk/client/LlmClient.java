@@ -28,7 +28,11 @@ public class LlmClient {
     private static final Logger log = LoggerFactory.getLogger(LlmClient.class);
 
     private final ObjectMapper mapper = new ObjectMapper();
-    private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).build();
+    // 部分兼容网关会在 HTTP/2 握手时直接断开。桌面端用的是 HTTP/1.1。
+    private final HttpClient http = HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1)
+            .connectTimeout(Duration.ofSeconds(20))
+            .build();
 
     /**
      * 调用大模型 chat/completions。
@@ -42,27 +46,44 @@ public class LlmClient {
     public String chat(String baseUrl, String apiKey, String model, List<Map<String, String>> messages) {
         log.info("LLM chat start, model={}, msgs={}", model, messages == null ? 0 : messages.size());
 
-        try {
-            String base = trim(baseUrl);
-            HttpResponse<String> resp = post(base + "/chat/completions", chatBody(model, messages, null), apiKey, Duration.ofSeconds(120));
-            if (resp.statusCode() == 404) {
-                log.info("LLM chat/completions 404, retry responses, model={}", model);
-                resp = post(base + "/responses", responsesBody(model, messages, null), apiKey, Duration.ofSeconds(120));
+        Exception last = null;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            try {
+                String base = trim(baseUrl);
+                HttpResponse<String> resp = post(base + "/chat/completions", chatBody(model, messages, null), apiKey, Duration.ofSeconds(120));
+                if (resp.statusCode() == 404) {
+                    log.info("LLM chat/completions 404, retry responses, model={}", model);
+                    resp = post(base + "/responses", responsesBody(model, messages, null), apiKey, Duration.ofSeconds(120));
+                }
+                if (resp.statusCode() >= 400) {
+                    throw new ApiException(HttpStatus.BAD_GATEWAY, "LLM 调用失败: " + errorText(resp));
+                }
+                String answer = assistantText(mapper.readTree(resp.body()));
+                if (answer.isBlank()) throw new ApiException(HttpStatus.BAD_GATEWAY, "LLM 未返回内容");
+                log.info("LLM chat success, chars={}", answer.length());
+                return answer;
+            } catch (ApiException e) {
+                log.warn("LLM chat business fail: {}", e.getMessage());
+                throw e;
+            } catch (Exception e) {
+                last = e;
+                if (attempt == 0 && retryable(e)) {
+                    log.warn("LLM chat retry after {}", e.getMessage());
+                    try { Thread.sleep(800); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                    continue;
+                }
+                break;
             }
-            if (resp.statusCode() >= 400) {
-                throw new ApiException(HttpStatus.BAD_GATEWAY, "LLM 调用失败: " + errorText(resp));
-            }
-            String answer = assistantText(mapper.readTree(resp.body()));
-            if (answer.isBlank()) throw new ApiException(HttpStatus.BAD_GATEWAY, "LLM 未返回内容");
-            log.info("LLM chat success, chars={}", answer.length());
-            return answer;
-        } catch (ApiException e) {
-            log.warn("LLM chat business fail: {}", e.getMessage());
-            throw e;
-        } catch (Exception e) {
-            log.error("LLM chat exception", e);
-            throw new ApiException(HttpStatus.BAD_GATEWAY, "LLM 调用异常: " + e.getMessage());
         }
+        log.error("LLM chat exception", last);
+        throw new ApiException(HttpStatus.BAD_GATEWAY, "LLM 调用异常: " + (last == null ? "" : last.getMessage()));
+    }
+
+    private static boolean retryable(Exception e) {
+        String name = e.getClass().getName();
+        String msg = e.getMessage() == null ? "" : e.getMessage().toLowerCase();
+        return name.contains("SSL") || name.contains("Connect") || name.contains("IOException")
+                || msg.contains("handshake") || msg.contains("reset") || msg.contains("terminated");
     }
 
     /**

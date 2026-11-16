@@ -80,9 +80,15 @@ public final class AdmissionCore {
     }
 
     public static boolean webHitUsable(String title, String url, String text, List<String> aliases) {
-        if (!mentions(text, aliases)) return false;
-        if ((title != null && title.contains("开庭公告")) || (url != null && url.contains("openNoticeDetail"))) return true;
-        return SearchCore.keepSearchHit(title);
+        return webSkipReason(title, url, text, aliases) == null;
+    }
+
+    /** 返回 null 表示这条网页可以当证据。原因与桌面端一致：未点名本公司，或标题没有风险词。 */
+    public static String webSkipReason(String title, String url, String text, List<String> aliases) {
+        if (!mentions(text, aliases)) return "未点名本公司";
+        if ((title != null && title.contains("开庭公告")) || (url != null && url.contains("openNoticeDetail"))) return null;
+        if (!SearchCore.keepSearchHit(title)) return "标题无风险词";
+        return null;
     }
 
     public static Review review(String name, String partnerType, String scenario, List<Evidence> docs, List<String> sourceLabels) {
@@ -118,14 +124,15 @@ public final class AdmissionCore {
         String summary = String.format("%s（%s）场景「%s」：一票否决 %d 项触发，重大违规 %d 项，关注 %d 项 → 结论【%s】%s",
                 name, RuleCatalog.partnerTypeLabel(partnerType), scenario, redN, orange.size(), yellow.size(), conclusion,
                 incomplete ? "（证据不完整）" : "");
-        String markdown = opinion(name, partnerType, "", scenario, conclusion, incomplete, items, remediation, summary, sourceLabels, "", docs);
+        String markdown = opinion(name, partnerType, "", scenario, conclusion, incomplete, items, remediation, summary, sourceLabels, "", "", docs);
         return new Review(conclusion, incomplete, items, remediation, summary, markdown, sourceLabels);
     }
 
     /** 与桌面端同一份准入意见书：工商摘录、AI 研判要点、分色清单和签批区。 */
-    public static String opinion(String name, String partnerType, String uscc, String scenario, Review review, String summary, String aiNotes, List<Evidence> docs) {
+    public static String opinion(String name, String partnerType, String uscc, String scenario, Review review,
+                                 String summary, String aiNotes, String webDigest, List<Evidence> docs) {
         return opinion(name, partnerType, uscc, scenario, review.conclusion(), review.evidenceIncomplete(),
-                review.items(), review.remediation(), summary, review.sources(), aiNotes, docs);
+                review.items(), review.remediation(), summary, review.sources(), aiNotes, webDigest, docs);
     }
 
     public static String notesUser(String name, String ptype, String scenario, Review review, List<Evidence> docs) {
@@ -163,7 +170,7 @@ public final class AdmissionCore {
 
     private static String opinion(String name, String ptype, String uscc, String scenario, String conclusion, boolean incomplete,
                                   List<Item> items, List<String> remediation, String summary, List<String> sources,
-                                  String aiNotes, List<Evidence> docs) {
+                                  String aiNotes, String webDigest, List<Evidence> docs) {
         StringBuilder md = new StringBuilder();
         String code = uscc == null || uscc.isBlank() ? "—" : uscc;
         String when = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
@@ -180,6 +187,9 @@ public final class AdmissionCore {
         else {
             for (String s : sources) md.append("- ").append(s).append("：").append(s.contains("未完成") ? "未完成" : "已接入").append('\n');
             md.append('\n');
+        }
+        if (webDigest != null && !webDigest.isBlank()) {
+            md.append("## 全网搜\n\n").append(webDigest.trim()).append("\n\n");
         }
         boolean mcp = false;
         for (Evidence d : docs) {
