@@ -20,7 +20,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * OpenAI 兼容 Chat Completions HTTP 客户端。
+ * OpenAI 兼容客户端。先走 chat/completions；该地址对这个模型返回 404 时，再走 /responses。
+ * 果冻这类网关把 gpt 模型只挂在 Responses 上。
  */
 @Component
 public class LlmClient {
@@ -42,30 +43,17 @@ public class LlmClient {
         log.info("LLM chat start, model={}, msgs={}", model, messages == null ? 0 : messages.size());
 
         try {
-            String url = baseUrl.replaceAll("/$", "") + "/chat/completions";
-            ObjectNode body = mapper.createObjectNode();
-            body.put("model", model);
-            ArrayNode arr = body.putArray("messages");
-            for (Map<String, String> m : messages) {
-                ObjectNode n = arr.addObject();
-                n.put("role", m.getOrDefault("role", "user"));
-                n.put("content", m.getOrDefault("content", ""));
+            String base = trim(baseUrl);
+            HttpResponse<String> resp = post(base + "/chat/completions", chatBody(model, messages, null), apiKey, Duration.ofSeconds(120));
+            if (resp.statusCode() == 404) {
+                log.info("LLM chat/completions 404, retry responses, model={}", model);
+                resp = post(base + "/responses", responsesBody(model, messages, null), apiKey, Duration.ofSeconds(120));
             }
-            HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(url))
-                    .timeout(Duration.ofSeconds(120))
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)));
-            if (apiKey != null && !apiKey.isBlank()) b.header("Authorization", "Bearer " + apiKey);
-            HttpResponse<String> resp = http.send(b.build(), HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() >= 400) {
-                throw new ApiException(HttpStatus.BAD_GATEWAY, "LLM 调用失败: HTTP " + resp.statusCode() + " " + resp.body());
+                throw new ApiException(HttpStatus.BAD_GATEWAY, "LLM 调用失败: " + errorText(resp));
             }
-            JsonNode root = mapper.readTree(resp.body());
-            JsonNode content = root.path("choices").path(0).path("message").path("content");
-            if (content.isMissingNode() || content.asText().isBlank()) {
-                throw new ApiException(HttpStatus.BAD_GATEWAY, "LLM 未返回内容");
-            }
-            String answer = content.asText();
+            String answer = assistantText(mapper.readTree(resp.body()));
+            if (answer.isBlank()) throw new ApiException(HttpStatus.BAD_GATEWAY, "LLM 未返回内容");
             log.info("LLM chat success, chars={}", answer.length());
             return answer;
         } catch (ApiException e) {
@@ -82,32 +70,94 @@ public class LlmClient {
      */
     public void ping(String baseUrl, String apiKey, String model) {
         try {
-            String url = baseUrl.replaceAll("/$", "") + "/chat/completions";
-            ObjectNode body = mapper.createObjectNode();
-            body.put("model", model);
-            body.put("max_tokens", 8);
-            ArrayNode arr = body.putArray("messages");
-            ObjectNode message = arr.addObject();
-            message.put("role", "user");
-            message.put("content", "ping");
-            HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(url))
-                    .timeout(Duration.ofSeconds(20))
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)));
-            if (apiKey != null && !apiKey.isBlank()) builder.header("Authorization", "Bearer " + apiKey);
-            HttpResponse<String> resp = http.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+            List<Map<String, String>> messages = List.of(Map.of("role", "user", "content", "ping"));
+            String base = trim(baseUrl);
+            HttpResponse<String> resp = post(base + "/chat/completions", chatBody(model, messages, 8), apiKey, Duration.ofSeconds(20));
+            if (resp.statusCode() == 404) {
+                resp = post(base + "/responses", responsesBody(model, messages, 16), apiKey, Duration.ofSeconds(20));
+            }
             if (resp.statusCode() >= 400) {
-                throw new ApiException(HttpStatus.BAD_GATEWAY, "HTTP " + resp.statusCode());
+                throw new ApiException(HttpStatus.BAD_GATEWAY, errorText(resp));
             }
             JsonNode root = mapper.readTree(resp.body());
-            if (root.has("error")) {
-                String text = root.path("error").path("message").asText("大模型返回错误");
-                throw new ApiException(HttpStatus.BAD_GATEWAY, text);
+            if (root.has("error") && !root.path("error").isNull()) {
+                throw new ApiException(HttpStatus.BAD_GATEWAY, errorText(resp));
             }
         } catch (ApiException e) {
             throw e;
         } catch (Exception e) {
             throw new ApiException(HttpStatus.BAD_GATEWAY, "网络错误: " + e.getMessage());
         }
+    }
+
+    private ObjectNode chatBody(String model, List<Map<String, String>> messages, Integer maxTokens) {
+        ObjectNode body = mapper.createObjectNode();
+        body.put("model", model);
+        if (maxTokens != null) body.put("max_tokens", maxTokens);
+        ArrayNode arr = body.putArray("messages");
+        for (Map<String, String> message : messages) {
+            ObjectNode node = arr.addObject();
+            node.put("role", message.getOrDefault("role", "user"));
+            node.put("content", message.getOrDefault("content", ""));
+        }
+        return body;
+    }
+
+    private ObjectNode responsesBody(String model, List<Map<String, String>> messages, Integer maxTokens) {
+        ObjectNode body = mapper.createObjectNode();
+        body.put("model", model);
+        if (maxTokens != null) body.put("max_output_tokens", maxTokens);
+        ArrayNode input = body.putArray("input");
+        for (Map<String, String> message : messages) {
+            ObjectNode node = input.addObject();
+            node.put("role", message.getOrDefault("role", "user"));
+            node.put("content", message.getOrDefault("content", ""));
+        }
+        return body;
+    }
+
+    private HttpResponse<String> post(String url, ObjectNode body, String apiKey, Duration timeout) throws Exception {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(url))
+                .timeout(timeout)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)));
+        if (apiKey != null && !apiKey.isBlank()) builder.header("Authorization", "Bearer " + apiKey.trim());
+        return http.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    private String assistantText(JsonNode root) {
+        String chat = root.path("choices").path(0).path("message").path("content").asText("");
+        if (!chat.isBlank()) return chat;
+        String outputText = root.path("output_text").asText("");
+        if (!outputText.isBlank()) return outputText;
+        StringBuilder text = new StringBuilder();
+        for (JsonNode item : root.path("output")) {
+            for (JsonNode part : item.path("content")) {
+                String piece = part.path("text").asText("");
+                if (!piece.isBlank()) {
+                    if (!text.isEmpty()) text.append('\n');
+                    text.append(piece);
+                }
+            }
+        }
+        return text.toString();
+    }
+
+    private String errorText(HttpResponse<String> resp) {
+        String detail = "";
+        try {
+            JsonNode root = mapper.readTree(resp.body());
+            detail = root.path("error").path("message").asText("");
+            if (detail.isBlank()) detail = root.path("message").asText("");
+        } catch (Exception ignored) {
+            detail = "";
+        }
+        detail = detail.replace('\n', ' ').trim();
+        if (detail.length() > 180) detail = detail.substring(0, 180) + "…";
+        return detail.isBlank() ? "HTTP " + resp.statusCode() : "HTTP " + resp.statusCode() + " " + detail;
+    }
+
+    private static String trim(String baseUrl) {
+        return baseUrl.replaceAll("/$", "");
     }
 }
